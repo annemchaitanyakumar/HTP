@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Search, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -10,27 +10,34 @@ export const SearchBar = ({ className = '', placeholder = 'Search products...' }
   const { searchQuery, setSearchQuery } = useSearchStore();
   const [isOpen, setIsOpen] = useState(false);
   const searchRef = useRef(null);
+  const resultsRef = useRef(null);
 
-  // Filter products based on search query
-  const searchResults = products.filter(product => 
-    searchQuery.trim() !== '' && (
-      product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.description.toLowerCase().includes(searchQuery.toLowerCase())
-    )
-  );
+  // Memoize search results to prevent re-renders
+  const searchResults = useMemo(() => {
+    return products.filter(
+      (product) =>
+        searchQuery.trim() !== '' &&
+        (product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          product.description.toLowerCase().includes(searchQuery.toLowerCase()))
+    );
+  }, [searchQuery]);
 
-  // Handle click outside to close search results and reset search
+  // Handle click outside to close search results
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (searchRef.current && !searchRef.current.contains(event.target)) {
+      if (
+        searchRef.current &&
+        !searchRef.current.contains(event.target) &&
+        resultsRef.current &&
+        !resultsRef.current.contains(event.target)
+      ) {
         setIsOpen(false);
-        setSearchQuery(''); // Reset search query when clicking outside
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [setSearchQuery]);
+  }, []);
 
   // Handle search input change
   const handleSearchChange = (e) => {
@@ -56,15 +63,19 @@ export const SearchBar = ({ className = '', placeholder = 'Search products...' }
           onChange={handleSearchChange}
           onFocus={() => setIsOpen(searchQuery.trim() !== '')}
           onBlur={() => {
-            // Use setTimeout to allow click events on search results to fire first
+            // Delay to allow clicks in SearchResults to register
             setTimeout(() => {
-              if (!searchRef.current?.contains(document.activeElement)) {
-                setSearchQuery('');
+              if (
+                !searchRef.current?.contains(document.activeElement) &&
+                !resultsRef.current?.contains(document.activeElement)
+              ) {
                 setIsOpen(false);
+                setSearchQuery('');
               }
             }, 200);
           }}
           className="pl-10 pr-10 w-full min-w-[100px]"
+          aria-label="Search products"
         />
         {searchQuery && (
           <Button
@@ -72,6 +83,7 @@ export const SearchBar = ({ className = '', placeholder = 'Search products...' }
             size="sm"
             className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0 hover:bg-transparent"
             onClick={handleClear}
+            aria-label="Clear search"
           >
             <X className="h-4 w-4 text-muted-foreground" />
           </Button>
@@ -79,10 +91,7 @@ export const SearchBar = ({ className = '', placeholder = 'Search products...' }
       </div>
 
       {isOpen && searchResults.length > 0 && (
-        <SearchResults 
-          results={searchResults} 
-          onClose={() => setIsOpen(false)} 
-        />
+        <SearchResults results={searchResults} onClose={() => setIsOpen(false)} ref={resultsRef} />
       )}
     </div>
   );

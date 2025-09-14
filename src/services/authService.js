@@ -135,6 +135,52 @@ class AuthService {
         // Delegate to tokenService (reuses the logic)
         return tokenService.refreshIfNeeded();
     }
+
+    async forgotPassword(email) {
+        const response = await fetch(`${API_BASE}/forgotpassword`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ email: email })
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error || 'Failed to send OTP');
+        }
+        return await response.text();
+    }
+
+    async validateResetOtp(email, otp) {
+        const response = await fetch(`${API_BASE}/validate-reset-otp?email=${encodeURIComponent(email)}&otp=${encodeURIComponent(otp)}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error || 'Failed to validate OTP');
+        }
+        return await response.text();
+    }
+
+    async resetPassword(email, newPassword) {
+        const response = await fetch(`${API_BASE}/reset-password?email=${encodeURIComponent(email)}&newPassword=${encodeURIComponent(newPassword)}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error || 'Failed to reset password');
+        }
+        return await response.text();
+    }
 }
 
 export const authService = new AuthService();

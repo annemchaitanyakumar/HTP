@@ -1,6 +1,8 @@
 import { tokenService } from './tokenService';
 
-export const userService = {
+const API_BASE = '/api';
+
+class UserService {
     async getUserInfo() {
         const token = tokenService.getAccessToken();
         console.log('[UserService] Getting user info with token:', token);
@@ -9,7 +11,7 @@ export const userService = {
             throw new Error('User not authenticated');
         }
 
-        const response = await fetch('/api/get-info', {
+        const response = await fetch(`${API_BASE}/get-info`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -23,43 +25,51 @@ export const userService = {
         }
 
         return response.json();
-    },
+    }
 
     async sendOtpForUpdate(editUserDTO) {
         const token = tokenService.getAccessToken();
-        const response = await fetch('/api/user-send-otp', {
+        console.log('[UserService] Sending OTP for update:', editUserDTO);
+        const response = await fetch(`${API_BASE}/user-send-otp`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': token
             },
+            credentials: 'include',
             body: JSON.stringify(editUserDTO)
         });
 
         if (!response.ok) {
-            const error = await response.text();
-            throw new Error(error || 'Failed to send OTP');
+            const errorText = await response.text();
+            console.error('[UserService] Error sending OTP:', errorText);
+            throw new Error(errorText || 'Failed to send OTP');
         }
 
         return await response.text();
-    },
+    }
 
     async updateUserInfo(validateDTO) {
         const token = tokenService.getAccessToken();
-        const response = await fetch('/api/user-update', {
+        console.log('[UserService] Updating user info:', validateDTO);
+        const response = await fetch(`${API_BASE}/user-update`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': token
             },
+            credentials: 'include',
             body: JSON.stringify(validateDTO)
         });
 
         if (!response.ok) {
-            const error = await response.text();
-            throw new Error(error || 'Failed to update user info');
+            const errorText = await response.text();
+            console.error('[UserService] Error updating user info:', errorText);
+            throw new Error(errorText || 'Failed to update user info');
         }
 
         return await response.json();
     }
-};
+}
+
+export const userService = new UserService();
