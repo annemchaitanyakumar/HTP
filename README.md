@@ -1,73 +1,121 @@
-# Welcome to your Lovable project
+# Homely-Taste-Pickles: Authentic Flavors Delivered
 
-## Project info
+## Project Overview
 
-**URL**: https://lovable.dev/projects/fede66e9-267c-4734-b01f-f2d04f56b1c1
+Homely-Taste-Pickles is an e-commerce platform dedicated to delivering the authentic taste of homemade pickles right to your doorstep. Browse a variety of traditional recipes crafted with love and the finest ingredients. Create an account, explore our selection, and enjoy the taste of home!
 
-## How can I edit this code?
+**Key Features:**
 
-There are several ways of editing your application.
+*   **User Authentication:** Securely create accounts, log in, and manage your profile.
+*   **Browse Pickles:** Explore a diverse range of pickle varieties with detailed descriptions.
+*   **Profile Management:** Update your personal information, manage addresses, and view order history.
+*   **Secure Checkout:** Coming Soon!
 
-**Use Lovable**
+**URL**: [Your Deployed URL Here] (Replace with the actual deployed URL)
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/fede66e9-267c-4734-b01f-f2d04f56b1c1) and start prompting.
+## Technologies Used
 
-Changes made via Lovable will be committed automatically to this repo.
+Homely-Taste-Pickles is built using the following technologies:
 
-**Use your preferred IDE**
+*   **Frontend:**
+    *   **React:** A JavaScript library for building user interfaces.
+    *   **Vite:** A fast build tool for modern web development.
+    *   **TypeScript:** Adds static typing to JavaScript for improved code quality.
+    *   **Tailwind CSS:** A utility-first CSS framework for rapid UI development.
+    *   **shadcn/ui:** Re-usable components built using Radix UI and Tailwind CSS.
+    *   **Lucide React:** Beautifully simple icons.
+    *   **Framer Motion:** A production-ready motion library for React.
+*   **Backend:**
+    *   **Java**
+    *   **Spring Boot**
+    *   **Spring Security**
+    *   **JWT (JSON Web Tokens)**
+*   **Other:**
+    *   **Lovable:** A platform for AI-assisted code editing and project management.
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## Getting Started
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+Here's how you can explore and contribute to the Homely-Taste-Pickles project:
 
-Follow these steps:
+**Prerequisites:**
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+*   Node.js (v18 or higher)
+*   npm (v8 or higher)
+*   Java Development Kit (JDK)
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+**Local Development:**
 
-# Step 3: Install the necessary dependencies.
-npm i
+1.  **Clone the Repository:**
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+    ```sh
+    git clone <YOUR_GIT_URL>
+    ```
 
-**Edit a file directly in GitHub**
+2.  **Navigate to the Project Directory:**
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+    ```sh
+    cd <YOUR_PROJECT_NAME>
+    ```
 
-**Use GitHub Codespaces**
+3.  **Install Frontend Dependencies:**
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+    ```sh
+    cd src
+    npm install
+    ```
 
-## What technologies are used for this project?
+4.  **Start the Frontend Development Server:**
 
-This project is built with:
+    ```sh
+    npm run dev
+    ```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+    This will launch the frontend application with hot-reloading, allowing you to see changes in real-time.
 
-## How can I deploy this project?
+5.  **Start the Backend Server:**
 
-Simply open [Lovable](https://lovable.dev/projects/fede66e9-267c-4734-b01f-f2d04f56b1c1) and click on Share -> Publish.
+    *   Navigate to the backend project directory.
+    *   Run the Spring Boot application (e.g., using your IDE or Maven).
 
-## Can I connect a custom domain to my Lovable project?
+**Direct Editing on GitHub**
 
-Yes, you can!
+For quick edits:
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+1.  Navigate to the file you want to modify.
+2.  Click the "Edit" button (pencil icon).
+3.  Make your changes and commit.
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+**GitHub Codespaces**
+
+For a cloud-based development environment:
+
+1.  Go to the main page of the repository.
+2.  Click the "Code" button.
+3.  Select the "Codespaces" tab.
+4.  Create a new Codespace and start editing.
+
+## Key Components
+
+*   **Authentication:**
+    *   `src/context/AuthContext.jsx`: Manages user authentication state and provides login, logout, and session management.
+    *   `src/services/authService.js`: Handles API calls for authentication-related tasks (login, registration, logout).
+    *   `src/services/tokenService.js`: Manages JWT tokens, including storage, retrieval, and validation.
+*   **User Profile:**
+    *   `src/pages/Profile.jsx`: Displays and manages user profile information.
+    *   `src/services/userService.js`: Handles API calls for fetching and updating user profile data.
+*   **UI Components:**
+    *   `src/components/ui`: Contains reusable UI components built with shadcn/ui and Tailwind CSS.
+*   **Routing:**
+    *   `src/App.jsx`: Main application component that sets up routing and context providers.
+    *   `src/routes.jsx`: Defines the application's routes and handles navigation.
+
+## Contributing
+
+We welcome contributions to Homely-Taste-Pickles! Please follow these guidelines:
+
+1.  Fork the repository.
+2.  Create a new branch for your feature or bug fix.
+3.  Make your changes and commit them with clear, concise messages.
+4.  Submit a pull request.
+
+## Deployment
