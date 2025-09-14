@@ -1,44 +1,65 @@
-// src/services/userService.js
-// Handles user account API calls: get-info, send-otp, update-user
-
 import { tokenService } from './tokenService';
 
-class UserService {
-  async getUserInfo() {
-    try {
-      const token = tokenService.getAccessToken();
-      console.log('[UserService] Token:', token); // Debug log
+export const userService = {
+    async getUserInfo() {
+        const token = tokenService.getAccessToken();
+        console.log('[UserService] Getting user info with token:', token);
 
-      if (!token) {
-        throw new Error('User not authenticated. Please log in.');
-      }
+        if (!token) {
+            throw new Error('User not authenticated');
+        }
 
-      const response = await fetch('/api/get-info', {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'Authorization': token // Token should already include 'Bearer '
-        },
-        credentials: 'include'
-      });
+        const response = await fetch('/api/get-info', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': token
+            },
+            credentials: 'include'
+        });
 
-      console.log('[UserService] Response status:', response.status); // Debug log
+        if (!response.ok) {
+            throw new Error('Failed to fetch user info');
+        }
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[UserService] Error:', errorText);
-        throw new Error(errorText || 'Failed to fetch user info');
-      }
+        return response.json();
+    },
 
-      const data = await response.json();
-      console.log('[UserService] Data received:', data); // Debug log
-      return data;
-    } catch (error) {
-      console.error('[UserService] Error:', error);
-      throw error;
+    async sendOtpForUpdate(editUserDTO) {
+        const token = tokenService.getAccessToken();
+        const response = await fetch('/api/user-send-otp', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': token
+            },
+            body: JSON.stringify(editUserDTO)
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error || 'Failed to send OTP');
+        }
+
+        return await response.text();
+    },
+
+    async updateUserInfo(validateDTO) {
+        const token = tokenService.getAccessToken();
+        const response = await fetch('/api/user-update', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': token
+            },
+            body: JSON.stringify(validateDTO)
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error || 'Failed to update user info');
+        }
+
+        return await response.json();
     }
-  }
-}
-
-export const userService = new UserService();
+};

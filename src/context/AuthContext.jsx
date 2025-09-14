@@ -1,13 +1,23 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { authService } from '@/services/authService';
 import { tokenService } from '@/services/tokenService';
+import { userService } from '@/services/userService'; // Import UserService
 import { cookieUtils } from '@/utils/cookieUtils';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-    const [user, setUser] = useState(null);
+    const [user, setUser] = useState(() => {
+        // Initialize from localStorage if available
+        const storedUser = localStorage.getItem('authData');
+        return storedUser ? JSON.parse(storedUser) : null;
+    });
     const [loading, setLoading] = useState(true);
+
+    // Log the user data to debug
+    useEffect(() => {
+        console.log('Current user data:', user);
+    }, [user]);
 
     useEffect(() => {
         const initAuth = async () => {
@@ -17,15 +27,20 @@ export const AuthProvider = ({ children }) => {
                 console.log('[AuthContext] Session restored:', restored);
 
                 if (restored) {
-                    const userData = tokenService.getUserInfo();
+                    // Fetch user info using UserService
+                    const userData = await userService.getUserInfo();
                     setUser(userData);
-                    console.log('[AuthContext] User data:', userData);
+                    console.log('[AuthContext] User data from UserService:', userData);
+                    // Save to localStorage
+                    localStorage.setItem('authData', JSON.stringify(userData));
                 } else {
                     setUser(null);
+                    localStorage.removeItem('authData');
                 }
             } catch (error) {
                 console.error('[AuthContext] Init error:', error);
                 setUser(null);
+                localStorage.removeItem('authData');
             } finally {
                 setLoading(false);
             }
@@ -39,13 +54,18 @@ export const AuthProvider = ({ children }) => {
             setLoading(true);
             const response = await authService.login(credentials);
             console.log('[AuthContext] Login successful:', response);
-            
-            const userData = tokenService.getUserInfo();
+
+            // Fetch user info using UserService after login
+            const userData = await userService.getUserInfo();
             setUser(userData);
+            console.log('[AuthContext] User data from UserService:', userData);
+            // Save to localStorage
+            localStorage.setItem('authData', JSON.stringify(userData));
             return true;
         } catch (error) {
             console.error('[AuthContext] Login failed:', error);
             setUser(null);
+            localStorage.removeItem('authData');
             throw error;
         } finally {
             setLoading(false);
@@ -57,6 +77,7 @@ export const AuthProvider = ({ children }) => {
             setLoading(true);
             await authService.logout();
             setUser(null);
+            localStorage.removeItem('authData');
             console.log('[AuthContext] Logout successful');
         } catch (error) {
             console.error('[AuthContext] Logout error:', error);
@@ -70,7 +91,7 @@ export const AuthProvider = ({ children }) => {
         loading,
         isAuthenticated: !!user,
         login,
-        logout
+        logout,
     };
 
     return (

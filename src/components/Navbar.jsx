@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShoppingCart, Menu, X, User, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,11 @@ export const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout, isAuthenticated, isAdmin } = useAuth();
+
+  // Add this debug log
+  useEffect(() => {
+    console.log('Navbar user data:', user);
+  }, [user]);
 
   const navItems = [
     { name: 'Home', path: '/' },
@@ -44,8 +49,6 @@ export const Navbar = () => {
               </span>
             </motion.div>
           </Link>
-
-          
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-8">
@@ -78,7 +81,7 @@ export const Navbar = () => {
                       className="text-muted-foreground hover:bg-secondary/10 hover:text-secondary transition-colors"
                     >
                       <User className="h-4 w-4 mr-2" />
-                      {isAdmin ? 'Admin' : 'Account'}
+                      {user?.firstname || user?.emailid || 'Account'}
                     </Button>
                   </Link>
                   <Button 
