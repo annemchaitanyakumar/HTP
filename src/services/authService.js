@@ -38,7 +38,6 @@ class AuthService {
                 email: data.emailid
             };
 
-            // Store in multiple places for redundancy
             localStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
             cookieUtils.setCookie(TOKEN_COOKIE, token);
             
@@ -59,7 +58,6 @@ class AuthService {
         try {
             console.log('[AuthService] Attempting to restore session');
             
-            // Try cookie first
             const cookieToken = cookieUtils.getCookie(TOKEN_COOKIE);
             const storedData = localStorage.getItem(USER_DATA_KEY);
             
@@ -73,7 +71,6 @@ class AuthService {
                 userData = JSON.parse(storedData);
             }
 
-            // Validate token format
             const token = cookieToken || userData?.accessToken;
             if (!token || !token.startsWith('Bearer ')) {
                 console.log('[AuthService] Invalid token format');
@@ -81,14 +78,12 @@ class AuthService {
                 return false;
             }
 
-            // Validate token expiration
             if (tokenService.isTokenExpired(token)) {
                 console.log('[AuthService] Token expired');
                 this.logout();
                 return false;
             }
 
-            // Restore session
             tokenService.setTokens(
                 token,
                 null,
@@ -119,7 +114,7 @@ class AuthService {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             },
-            credentials: 'include',  // For consistency
+            credentials: 'include',
             body: JSON.stringify(userData)
         });
 
@@ -132,17 +127,18 @@ class AuthService {
     }
 
     async refreshToken() {
-        // Delegate to tokenService (reuses the logic)
         return tokenService.refreshIfNeeded();
     }
 
-    async forgotPassword(email) {
+    // New method for initiating forgot password
+    async forgotPassword(data) {
+        console.log('[AuthService] Initiating forgot password');
         const response = await fetch(`${API_BASE}/forgotpassword`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ email: email })
+            body: JSON.stringify(data)
         });
 
         if (!response.ok) {
@@ -152,12 +148,15 @@ class AuthService {
         return await response.text();
     }
 
-    async validateResetOtp(email, otp) {
-        const response = await fetch(`${API_BASE}/validate-reset-otp?email=${encodeURIComponent(email)}&otp=${encodeURIComponent(otp)}`, {
+    // New method for validating reset OTP
+    async validateResetOtp(data) {
+        console.log('[AuthService] Validating reset OTP');
+        const response = await fetch(`${API_BASE}/validate-reset-otp`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-            }
+            },
+            body: JSON.stringify(data)
         });
 
         if (!response.ok) {
@@ -167,12 +166,15 @@ class AuthService {
         return await response.text();
     }
 
-    async resetPassword(email, newPassword) {
-        const response = await fetch(`${API_BASE}/reset-password?email=${encodeURIComponent(email)}&newPassword=${encodeURIComponent(newPassword)}`, {
+    // New method for resetting password
+    async resetPassword(data) {
+        console.log('[AuthService] Resetting password');
+        const response = await fetch(`${API_BASE}/reset-password`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-            }
+            },
+            body: JSON.stringify(data)
         });
 
         if (!response.ok) {
