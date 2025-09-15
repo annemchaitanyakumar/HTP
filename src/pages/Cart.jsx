@@ -85,9 +85,17 @@ export default function Cart() {
                       <CardContent className="p-6">
                         <div className="flex items-center gap-4">
                           <img
-                            src={item.image}
+                            src={
+                              item.image
+                                ? item.image.replace('https%3A/', 'https:/') // Fix double-encoded URLs
+                                : '/placeholder.png'
+                            }
                             alt={item.name}
                             className="w-20 h-20 object-cover rounded-lg"
+                            onError={e => {
+                              e.target.src = '/placeholder.png';
+                              e.target.onerror = null;
+                            }}
                           />
                           
                           <div className="flex-1">

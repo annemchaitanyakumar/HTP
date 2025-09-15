@@ -67,7 +67,7 @@ export const Navbar = () => {
                 {item.name}
               </Link>
             ))}
-            <SearchBar className="w-48" />
+            <SearchBar className="w-40" />
           </div>
 
           {/* Cart, Auth, and Mobile Menu */}
@@ -156,7 +156,7 @@ export const Navbar = () => {
               className="md:hidden"
             >
               <div className="py-4 space-y-4">
-                <SearchBar className="w-[calc(100%-1rem)] mx-2 mb-4" />
+                <SearchBar className="w-full mx-2 mb-4" />
                 {navItems.map(item => (
                   <Link
                     key={item.path}
