@@ -4,10 +4,13 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useSearchStore } from '@/store/searchStore';
 import { SearchResults } from './SearchResults';
-import { products } from '@/data/products';
+import { useProductStore } from '@/store/productStore';
+import { useCartStore } from '@/store/cartStore';
 
 export const SearchBar = ({ className = '', placeholder = 'Search products...' }) => {
   const { searchQuery, setSearchQuery } = useSearchStore();
+  const products = useProductStore((state) => state.products); // <-- Always use backend products
+  const { addItem } = useCartStore();
   const [isOpen, setIsOpen] = useState(false);
   const searchRef = useRef(null);
   const resultsRef = useRef(null);
@@ -17,10 +20,10 @@ export const SearchBar = ({ className = '', placeholder = 'Search products...' }
     return products.filter(
       (product) =>
         searchQuery.trim() !== '' &&
-        (product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          product.description.toLowerCase().includes(searchQuery.toLowerCase()))
+        (product.product_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          product.product_description.toLowerCase().includes(searchQuery.toLowerCase()))
     );
-  }, [searchQuery]);
+  }, [searchQuery, products]);
 
   // Handle click outside to close search results
   useEffect(() => {

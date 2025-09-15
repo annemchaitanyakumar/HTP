@@ -131,57 +131,66 @@ class AuthService {
     }
 
     // New method for initiating forgot password
-    async forgotPassword(data) {
+    async forgotPassword(email) {
         console.log('[AuthService] Initiating forgot password');
         const response = await fetch(`${API_BASE}/forgotpassword`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'application/json'
             },
-            body: JSON.stringify(data)
+            credentials: 'include',
+            body: JSON.stringify({ email })
         });
 
         if (!response.ok) {
             const error = await response.text();
-            throw new Error(error || 'Failed to send OTP');
+            throw new Error(error || 'Failed to send reset email');
         }
-        return await response.text();
+
+        return response.json();
     }
 
     // New method for validating reset OTP
-    async validateResetOtp(data) {
+    async validateResetOtp(email, otp) {
         console.log('[AuthService] Validating reset OTP');
         const response = await fetch(`${API_BASE}/validate-reset-otp`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'application/json'
             },
-            body: JSON.stringify(data)
+            credentials: 'include',
+            body: JSON.stringify({ email, otp })
         });
 
         if (!response.ok) {
             const error = await response.text();
-            throw new Error(error || 'Failed to validate OTP');
+            throw new Error(error || 'Invalid OTP');
         }
-        return await response.text();
+
+        return response.json();
     }
 
     // New method for resetting password
-    async resetPassword(data) {
+    async resetPassword(email, newPassword) {
         console.log('[AuthService] Resetting password');
         const response = await fetch(`${API_BASE}/reset-password`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'application/json'
             },
-            body: JSON.stringify(data)
+            credentials: 'include',
+            body: JSON.stringify({ email, newPassword })
         });
 
         if (!response.ok) {
             const error = await response.text();
             throw new Error(error || 'Failed to reset password');
         }
-        return await response.text();
+
+        return response.json();
     }
 }
 

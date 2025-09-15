@@ -7,6 +7,7 @@ import { useCartStore } from '@/store/cartStore';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { SearchBar } from '@/components/SearchBar';
 import { useAuth } from '@/context/AuthContext';
+import { useProductStore } from '@/store/productStore';
 
 export const Navbar = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -14,6 +15,7 @@ export const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout, isAuthenticated, isAdmin } = useAuth();
+  const products = useProductStore(state => state.products);
 
   // Add this debug log
   useEffect(() => {

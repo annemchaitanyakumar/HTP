@@ -44,21 +44,25 @@ export const useCartStore = create(
     (set, get) => ({
       items: [],
       
-      addItem: (product) => {
+      addItem: (item) => {
         set((state) => {
-          const existingItem = state.items.find(item => item.id === product.id);
-          if (existingItem) {
-            return {
-              items: state.items.map(item =>
-                item.id === product.id
-                  ? { ...item, quantity: item.quantity + 1 }
-                  : item
-              ),
-            };
+          // Find if an item with the same id AND weight exists
+          const existingIndex = state.items.findIndex(
+            (cartItem) =>
+              cartItem.id === item.id &&
+              (cartItem.weight || null) === (item.weight || null)
+          );
+          if (existingIndex !== -1) {
+            // If found, increase quantity
+            const updatedItems = [...state.items];
+            updatedItems[existingIndex].quantity += 1;
+            // Move the updated item to the top
+            const [updatedItem] = updatedItems.splice(existingIndex, 1);
+            return { items: [updatedItem, ...updatedItems] };
+          } else {
+            // Add new item at the top
+            return { items: [item, ...state.items] };
           }
-          return {
-            items: [...state.items, { ...product, quantity: 1 }],
-          };
         });
       },
 

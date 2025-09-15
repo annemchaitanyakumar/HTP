@@ -9,13 +9,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Navbar } from '@/components/Navbar';
 import { useAuth } from '@/context/AuthContext';
-import { authService } from '@/services/authService';
-import { useToast } from "@/hooks/use-toast";
 
 export default function Login() {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const { toast } = useToast();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -28,7 +25,6 @@ export default function Login() {
     email: '',
     otp: '',
     newPassword: '',
-    confirmPassword: '',
     error: '',
     loading: false
   });
@@ -68,71 +64,15 @@ export default function Login() {
 
     try {
       if (forgotPasswordState.step === 'email') {
-        const response = await authService.forgotPassword({
-          email: forgotPasswordState.email.trim()
-        });
-        setForgotPasswordState(prev => ({ 
-          ...prev, 
-          step: 'otp', 
-          loading: false,
-          message: response
-        }));
+        await authService.forgotPassword(forgotPasswordState.email);
+        setForgotPasswordState(prev => ({ ...prev, step: 'otp', loading: false }));
       } else if (forgotPasswordState.step === 'otp') {
-        const response = await authService.validateResetOtp({
-          email: forgotPasswordState.email.trim(),
-          otp: forgotPasswordState.otp.trim()
-        });
-        setForgotPasswordState(prev => ({ 
-          ...prev, 
-          step: 'reset', 
-          loading: false,
-          message: response
-        }));
+        await authService.validateResetOtp(forgotPasswordState.email, forgotPasswordState.otp);
+        setForgotPasswordState(prev => ({ ...prev, step: 'reset', loading: false }));
       } else if (forgotPasswordState.step === 'reset') {
-        // Remove the trim() calls as they might cause issues with comparison
-        const newPassword = forgotPasswordState.newPassword;
-        const confirmPassword = forgotPasswordState.confirmPassword;
-
-        // Simple direct comparison
-        if (newPassword !== confirmPassword) {
-          setForgotPasswordState(prev => ({
-            ...prev,
-            error: "Passwords don't match",
-            loading: false
-          }));
-          return;
-        }
-
-        try {
-          const response = await authService.resetPassword({
-            email: forgotPasswordState.email,
-            newPassword: newPassword // Send only newPassword
-          });
-          
-          toast({
-            title: "Success!",
-            description: "Password has been reset successfully. Please login with your new password.",
-            variant: "default",
-          });
-
-          // Reset the form and close modal
-          setForgotPasswordState({
-            showModal: false,
-            step: 'email',
-            email: '',
-            otp: '',
-            newPassword: '',
-            confirmPassword: '',
-            error: '',
-            loading: false
-          });
-        } catch (err) {
-          setForgotPasswordState(prev => ({
-            ...prev,
-            error: err.message || 'Failed to reset password',
-            loading: false
-          }));
-        }
+        await authService.resetPassword(forgotPasswordState.email, forgotPasswordState.newPassword);
+        setForgotPasswordState(prev => ({ ...prev, showModal: false, loading: false }));
+        alert('Password reset successfully. Please log in with your new password.');
       }
     } catch (err) {
       setForgotPasswordState(prev => ({
@@ -151,7 +91,6 @@ export default function Login() {
       email: '',
       otp: '',
       newPassword: '',
-      confirmPassword: '',
       error: ''
     }));
   };
@@ -209,6 +148,16 @@ export default function Login() {
                         />
                       </div>
 
+                      <div className="text-right">
+                        <button
+                          type="button"
+                          onClick={openForgotPasswordModal}
+                          className="text-sm text-primary hover:underline"
+                        >
+                          Forgot your password?
+                        </button>
+                      </div>
+
                       <Button
                         type="submit"
                         className="w-full bg-gradient-to-r from-secondary to-primary text-primary-foreground hover:opacity-90 shadow-warm"
@@ -216,17 +165,6 @@ export default function Login() {
                       >
                         {loading ? 'Logging in...' : 'Login'}
                       </Button>
-
-                      <div className="text-center">
-                        <Button
-                          type="button"
-                          variant="link"
-                          onClick={openForgotPasswordModal}
-                          className="text-sm text-muted-foreground hover:text-primary"
-                        >
-                          Forgot your password?
-                        </Button>
-                      </div>
                     </form>
                   </CardContent>
                 </Card>
@@ -320,49 +258,23 @@ export default function Login() {
               )}
 
               {forgotPasswordState.step === 'reset' && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="newPassword">New Password</Label>
-                    <Input
-                      id="newPassword"
-                      type="password"
-                      value={forgotPasswordState.newPassword}
-                      onChange={handleForgotPasswordInput}
-                      placeholder="Enter your new password"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="confirmPassword">Confirm Password</Label>
-                    <Input
-                      id="confirmPassword"
-                      type="password"
-                      value={forgotPasswordState.confirmPassword}
-                      onChange={handleForgotPasswordInput}
-                      placeholder="Confirm your new password"
-                      required
-                    />
-                  </div>
-                  {forgotPasswordState.newPassword && 
-                   forgotPasswordState.confirmPassword && 
-                   forgotPasswordState.newPassword !== forgotPasswordState.confirmPassword && (
-                    <Alert variant="destructive">
-                      <AlertDescription>Passwords don't match</AlertDescription>
-                    </Alert>
-                  )}
-                </>
+                <div className="space-y-2">
+                  <Label htmlFor="newPassword">New Password</Label>
+                  <Input
+                    id="newPassword"
+                    type="password"
+                    value={forgotPasswordState.newPassword}
+                    onChange={handleForgotPasswordInput}
+                    placeholder="Enter your new password"
+                    required
+                  />
+                </div>
               )}
 
               <DialogFooter>
                 <Button
                   type="submit"
-                  disabled={
-                    forgotPasswordState.loading || 
-                    (forgotPasswordState.step === 'reset' && 
-                      (forgotPasswordState.newPassword !== forgotPasswordState.confirmPassword ||
-                       !forgotPasswordState.newPassword ||
-                       !forgotPasswordState.confirmPassword))
-                  }
+                  disabled={forgotPasswordState.loading}
                   className="bg-gradient-to-r from-secondary to-primary text-primary-foreground hover:opacity-90"
                 >
                   {forgotPasswordState.loading
