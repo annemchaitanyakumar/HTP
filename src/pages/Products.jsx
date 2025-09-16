@@ -8,8 +8,6 @@ import { Navbar } from '@/components/Navbar';
 import { useCartStore } from '@/store/cartStore'; // <-- Use this, not any context
 import { useProductStore } from '@/store/productStore';
 
-const PRESIGNED_CACHE_KEY = 'presigned_urls_cache';
-
 export default function Products() {
   const [selectedWeights, setSelectedWeights] = useState({});
   const [products, setProducts] = useState([]);
@@ -18,6 +16,8 @@ export default function Products() {
   const { toast } = useToast();
   const { addItem } = useCartStore();
   const setGlobalProducts = useProductStore(state => state.setProducts);
+  const [urlExpiryTimes, setUrlExpiryTimes] = useState({});
+  const REFRESH_BUFFER = 300; // Refresh 5 minutes before expiry
 
   useEffect(() => {
     fetchProducts();
@@ -25,19 +25,31 @@ export default function Products() {
 
   const fetchProducts = async () => {
     try {
-      const data = await productService.getAllProducts();
+      const response = await productService.getAllProducts();
+      console.log('Products data:', response); // Debug log
 
-      // For each product, fetch presigned URLs
-      const productsWithUrls = await Promise.all(
-        data.map(async (product) => {
-          const presignedImages = await fetchPresignedUrls(product.id);
-          return { ...product, ...presignedImages };
+      // Fetch presigned URLs for each product
+      const productsWithPresignedUrls = await Promise.all(
+        response.map(async (product) => {
+          try {
+            const presignedUrlsResponse = await fetchPresignedUrls(product.id);
+            return {
+              ...product,
+              product_image1_url: presignedUrlsResponse.image1_url,
+              product_image2_url: presignedUrlsResponse.image2_url,
+              product_image3_url: presignedUrlsResponse.image3_url,
+            };
+          } catch (error) {
+            console.error(`Error fetching presigned URLs for product ${product.id}:`, error);
+            return product; // Return the product without presigned URLs
+          }
         })
       );
 
-      setProducts(productsWithUrls);
-      setGlobalProducts(productsWithUrls);
+      setProducts(productsWithPresignedUrls);
+      setGlobalProducts(productsWithPresignedUrls);
     } catch (error) {
+      console.error('Error fetching products:', error);
       toast({
         variant: "destructive",
         title: "Error",
@@ -48,19 +60,25 @@ export default function Products() {
     }
   };
 
+  const fetchPresignedUrls = async (productId) => {
+    const presignedUrlsUrl = `http://localhost:8000/api/products/${productId}/presigned-urls/`;
+    const response = await fetch(presignedUrlsUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch presigned URLs for product ${productId}`);
+    }
+    return await response.json();
+  };
+
   const filteredProducts = products.filter(product => {
     const matchesFilter = filter === 'all' || product.category === filter.toUpperCase();
-    
     return matchesFilter;
   });
 
   const handleWeightSelect = (productId, weight, price) => {
     setSelectedWeights(prev => {
-      // If already selected, deselect
       if (prev[productId]?.weight === weight) {
         return { ...prev, [productId]: undefined };
       }
-      // Else, select
       return { ...prev, [productId]: { weight, price } };
     });
   };
@@ -83,7 +101,7 @@ export default function Products() {
       price: product.category === 'VEG'
         ? weightSelection.price
         : parseFloat(product.product_price),
-      image: product.product_image1,
+      image: product.product_image1_url || '/placeholder.png', // Use product_image1_url
       weight: product.category === 'VEG' ? weightSelection.weight : null,
       category: product.category,
       quantity: 1
@@ -95,7 +113,6 @@ export default function Products() {
     });
   };
 
-  // Add this helper function inside your component (before return)
   const getMainPrice = (product) => {
     let priceByWeight = product.price_by_weight;
     if (typeof priceByWeight === 'string') {
@@ -105,10 +122,8 @@ export default function Products() {
         priceByWeight = {};
       }
     }
-    // Prefer 500g, then 1000g, then highest available
     if (priceByWeight['500'] > 0) return { price: priceByWeight['500'], weight: 500 };
     if (priceByWeight['1000'] > 0) return { price: priceByWeight['1000'], weight: 1000 };
-    // Find the highest available weight with price > 0
     const available = Object.entries(priceByWeight)
       .filter(([w, p]) => Number(p) > 0)
       .sort((a, b) => Number(b[0]) - Number(a[0]));
@@ -118,54 +133,50 @@ export default function Products() {
     return { price: 0, weight: null };
   };
 
-  const fetchPresignedUrls = async (productId) => {
-    const cacheRaw = localStorage.getItem(PRESIGNED_CACHE_KEY);
-    const cache = cacheRaw ? JSON.parse(cacheRaw) : {};
+  const checkAndRefreshUrls = async () => {
     const now = Date.now();
+    const productsToRefresh = products.filter(product => {
+      const expiryTime = urlExpiryTimes[product.id];
+      return !expiryTime || now >= (expiryTime - REFRESH_BUFFER * 1000);
+    });
 
-    // If cached and not expired (30 min = 1800000 ms)
-    if (
-      cache[productId] &&
-      cache[productId].timestamp &&
-      now - cache[productId].timestamp < 1800000 &&
-      cache[productId].urls
-    ) {
-      return cache[productId].urls;
-    }
+    if (productsToRefresh.length > 0) {
+      const updatedProducts = await Promise.all(
+        productsToRefresh.map(async (product) => {
+          try {
+            const presignedUrlsResponse = await fetchPresignedUrls(product.id);
+            // Update expiry time (current time + 1 hour - buffer)
+            setUrlExpiryTimes(prev => ({
+              ...prev,
+              [product.id]: Date.now() + 3600000 // 1 hour in milliseconds
+            }));
+            
+            return {
+              ...product,
+              product_image1_url: presignedUrlsResponse.image1_url,
+              product_image2_url: presignedUrlsResponse.image2_url,
+              product_image3_url: presignedUrlsResponse.image3_url,
+            };
+          } catch (error) {
+            console.error(`Error refreshing URLs for product ${product.id}:`, error);
+            return product;
+          }
+        })
+      );
 
-    // Fetch from backend (no role check)
-    const accessToken = localStorage.getItem('accessToken');
-    try {
-      const response = await fetch(`http://localhost:8000/api/products/${productId}/generate-upload-urls/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': accessToken,
-        },
+      setProducts(prevProducts => {
+        const productMap = new Map(prevProducts.map(p => [p.id, p]));
+        updatedProducts.forEach(p => productMap.set(p.id, p));
+        return Array.from(productMap.values());
       });
-      const data = await response.json();
-      const urls = {
-        product_image1: data.image1?.view_url || '/placeholder.png',
-        product_image2: data.image2?.view_url || null,
-        product_image3: data.image3?.view_url || null,
-      };
-
-      // Store in cache
-      cache[productId] = {
-        timestamp: now,
-        urls,
-      };
-      localStorage.setItem(PRESIGNED_CACHE_KEY, JSON.stringify(cache));
-      return urls;
-    } catch (err) {
-      console.error('Failed to fetch presigned URLs:', err);
-      return {
-        product_image1: '/placeholder.png',
-        product_image2: null,
-        product_image3: null,
-      };
     }
   };
+
+  // Add this useEffect to periodically check URL expiration
+  useEffect(() => {
+    const intervalId = setInterval(checkAndRefreshUrls, REFRESH_BUFFER * 1000);
+    return () => clearInterval(intervalId);
+  }, [products, urlExpiryTimes]);
 
   if (loading) {
     return (
@@ -178,7 +189,7 @@ export default function Products() {
   return (
     <div className="min-h-screen bg-gradient-warm">
       <Navbar />
-      
+
       {/* Hero Section */}
       <section className="pt-24 pb-16 px-4">
         <div className="container mx-auto">
@@ -191,7 +202,7 @@ export default function Products() {
               Our <span className="gradient-primary bg-clip-text text-transparent">Products</span>
             </h1>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Discover our handcrafted collection of traditional Indian pickles, 
+              Discover our handcrafted collection of traditional Indian pickles,
               made with authentic recipes and premium ingredients.
             </p>
           </motion.div>
@@ -245,27 +256,34 @@ export default function Products() {
               >
                 <div className="relative group">
                   <img
-                    src={product.product_image1 || '/placeholder.png'}
+                    src={product.product_image1_url || '/placeholder.png'}
                     alt={product.product_name}
                     className="w-full h-64 object-cover transition-transform duration-300 group-hover:scale-105"
                     onError={(e) => {
+                      console.error('Image failed to load:', product.id, e.target.src);
                       e.target.src = '/placeholder.png';
                       e.target.onerror = null;
                     }}
                   />
-                  {product.product_image2 && (
+
+                  {/* Second image hover effect */}
+                  {product.product_image2_url && (
                     <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                       <img
-                        src={product.product_image2}
+                        src={product.product_image2_url}
                         alt={`${product.product_name} alternate view`}
                         className="w-full h-64 object-cover"
+                        onError={(e) => {
+                          e.target.src = '/placeholder.png';
+                          e.target.onerror = null;
+                        }}
                       />
                     </div>
                   )}
                   <div className="absolute top-4 right-4">
                     <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      product.category === 'VEG' 
-                        ? 'bg-green-100 text-green-800' 
+                      product.category === 'VEG'
+                        ? 'bg-green-100 text-green-800'
                         : 'bg-red-100 text-red-800'
                     }`}>
                       {product.category}
@@ -276,7 +294,7 @@ export default function Products() {
                 <div className="p-6">
                   <h3 className="text-xl font-bold mb-2 text-gray-800">{product.product_name}</h3>
                   <p className="text-gray-600 text-sm mb-4 line-clamp-2">{product.product_description}</p>
-                  
+
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       {(() => {
@@ -323,12 +341,12 @@ export default function Products() {
                     )}
 
                     <div className="flex gap-2">
-                      <Link 
+                      <Link
                         to={`/products/${product.id}`}
                         className="flex-1"
                       >
-                        <Button 
-                          variant="secondary" 
+                        <Button
+                          variant="secondary"
                           className="w-full"
                         >
                           View Details
