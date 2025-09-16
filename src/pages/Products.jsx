@@ -8,13 +8,15 @@ import { Navbar } from '@/components/Navbar';
 import { useCartStore } from '@/store/cartStore'; // <-- Use this, not any context
 import { useProductStore } from '@/store/productStore';
 
+const PRESIGNED_CACHE_KEY = 'presigned_urls_cache';
+
 export default function Products() {
   const [selectedWeights, setSelectedWeights] = useState({});
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const { toast } = useToast();
-  const { addItem } = useCartStore(); // <-- Use addItem from your Zustand store
+  const { addItem } = useCartStore();
   const setGlobalProducts = useProductStore(state => state.setProducts);
 
   useEffect(() => {
@@ -24,8 +26,17 @@ export default function Products() {
   const fetchProducts = async () => {
     try {
       const data = await productService.getAllProducts();
-      setProducts(data);
-      setGlobalProducts(data); // <-- Set globally
+
+      // For each product, fetch presigned URLs
+      const productsWithUrls = await Promise.all(
+        data.map(async (product) => {
+          const presignedImages = await fetchPresignedUrls(product.id);
+          return { ...product, ...presignedImages };
+        })
+      );
+
+      setProducts(productsWithUrls);
+      setGlobalProducts(productsWithUrls);
     } catch (error) {
       toast({
         variant: "destructive",
@@ -105,6 +116,55 @@ export default function Products() {
       return { price: available[0][1], weight: available[0][0] };
     }
     return { price: 0, weight: null };
+  };
+
+  const fetchPresignedUrls = async (productId) => {
+    const cacheRaw = localStorage.getItem(PRESIGNED_CACHE_KEY);
+    const cache = cacheRaw ? JSON.parse(cacheRaw) : {};
+    const now = Date.now();
+
+    // If cached and not expired (30 min = 1800000 ms)
+    if (
+      cache[productId] &&
+      cache[productId].timestamp &&
+      now - cache[productId].timestamp < 1800000 &&
+      cache[productId].urls
+    ) {
+      return cache[productId].urls;
+    }
+
+    // Fetch from backend (no role check)
+    const accessToken = localStorage.getItem('accessToken');
+    try {
+      const response = await fetch(`http://localhost:8000/api/products/${productId}/generate-upload-urls/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': accessToken,
+        },
+      });
+      const data = await response.json();
+      const urls = {
+        product_image1: data.image1?.view_url || '/placeholder.png',
+        product_image2: data.image2?.view_url || null,
+        product_image3: data.image3?.view_url || null,
+      };
+
+      // Store in cache
+      cache[productId] = {
+        timestamp: now,
+        urls,
+      };
+      localStorage.setItem(PRESIGNED_CACHE_KEY, JSON.stringify(cache));
+      return urls;
+    } catch (err) {
+      console.error('Failed to fetch presigned URLs:', err);
+      return {
+        product_image1: '/placeholder.png',
+        product_image2: null,
+        product_image3: null,
+      };
+    }
   };
 
   if (loading) {

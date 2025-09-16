@@ -169,7 +169,8 @@ class AuthService {
             throw new Error(error || 'Invalid OTP');
         }
 
-        return response.json();
+        return response.text();
+
     }
 
     // New method for resetting password

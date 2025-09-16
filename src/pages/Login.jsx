@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Navbar } from '@/components/Navbar';
 import { useAuth } from '@/context/AuthContext';
+import { authService } from '@/services/authService';
 
 export default function Login() {
   const navigate = useNavigate();
