@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
@@ -9,7 +10,13 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from "@/hooks/use-toast";
-import { User, MapPin, Package, Lock } from 'lucide-react';
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSeparator,
+  InputOTPSlot,
+} from "@/components/ui/input-otp";
+import { User, MapPin, Package, Lock, Plus, ShoppingBag } from 'lucide-react';
 import { userService } from '@/services/userService';
 import {
   Dialog,
@@ -25,6 +32,7 @@ export default function Profile() {
   const [profileData, setProfileData] = useState(null);
   const [error, setError] = useState('');
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // New state variables for editing
   const [editMode, setEditMode] = useState(false);
@@ -116,7 +124,6 @@ export default function Profile() {
   const handleUpdateProfile = async () => {
     try {
       setLoading(true);
-      setError('');
       const validateDTO = {
         userid: profileData.userid,
         otp: otp,
@@ -130,11 +137,20 @@ export default function Profile() {
       setProfileData(updatedUser);
       setEditMode(false);
       setOtpDialogOpen(false);
+      setOtp('');
       // Update AuthContext with new user data
       localStorage.setItem('authData', JSON.stringify(updatedUser));
+      toast({
+        title: "Success",
+        description: "Profile updated successfully",
+      });
     } catch (err) {
       console.error('Error updating profile:', err);
-      setError(err.message || 'Failed to update profile');
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: err.message || 'Invalid OTP. Please try again.',
+      });
     } finally {
       setLoading(false);
     }
@@ -143,16 +159,17 @@ export default function Profile() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
-      <div className="container mx-auto px-4 pt-24 pb-16">
+      <div className="container mx-auto px-4 pt-16 sm:pt-24 pb-16">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
+          className="w-full"
         >
           <Card className="w-full max-w-4xl mx-auto">
-            <CardContent className="p-6">
+            <CardContent className="p-4 sm:p-6">
               <Tabs defaultValue={activeTab} value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-4 gap-4">
+                <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
                   <TabsTrigger value="account" className="data-[state=active]:bg-primary">
                     <User className="h-4 w-4 mr-2" />
                     Account
@@ -180,44 +197,48 @@ export default function Profile() {
                     ) : (
                       profileData ? (
                         <div className="space-y-6">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                             <div className="space-y-2">
-                              <Label htmlFor="firstname">First Name</Label>
+                              <Label htmlFor="firstname" className="text-sm sm:text-base">First Name</Label>
                               <Input
                                 id="firstname"
                                 value={editedData?.firstname || ''}
                                 onChange={handleInputChange}
                                 disabled={!editMode}
+                                className="h-9 sm:h-10"
                               />
                             </div>
                             <div className="space-y-2">
-                              <Label htmlFor="lastname">Last Name</Label>
+                              <Label htmlFor="lastname" className="text-sm sm:text-base">Last Name</Label>
                               <Input
                                 id="lastname"
                                 value={editedData?.lastname || ''}
                                 onChange={handleInputChange}
                                 disabled={!editMode}
+                                className="h-9 sm:h-10"
                               />
                             </div>
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="email">Email</Label>
+                            <Label htmlFor="email" className="text-sm sm:text-base">Email</Label>
                             <Input
                               id="email"
                               type="email"
                               value={editedData?.emailid || ''}
                               onChange={handleInputChange}
                               disabled={!editMode}
+                              className="h-9 sm:h-10"
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="mobile">Mobile Number</Label>
+                            <Label htmlFor="mobile" className="text-sm sm:text-base">Mobile Number</Label>
                             <Input
                               id="mobile"
                               type="tel"
                               value={editedData?.mobilenum || ''}
                               onChange={handleInputChange}
                               disabled={!editMode}
+                              className="h-9 sm:h-10"
                             />
                           </div>
                           {editMode ? (
@@ -253,32 +274,52 @@ export default function Profile() {
                   </TabsContent>
 
                   <TabsContent value="addresses">
-                    <div className="space-y-4">
-                      <h3 className="text-lg font-medium">Saved Addresses</h3>
-                      <p className="text-muted-foreground">No addresses saved yet.</p>
+                    <div className="space-y-6">
+                      <h3 className="text-lg sm:text-xl font-medium">Saved Addresses</h3>
+                      <div className="space-y-4">
+                        <p className="text-muted-foreground text-sm sm:text-base">No addresses saved yet.</p>
+                        <Button className="w-full sm:w-auto">
+                          <Plus className="w-4 h-4 mr-2" />
+                          Add New Address
+                        </Button>
+                      </div>
                     </div>
                   </TabsContent>
 
                   <TabsContent value="orders">
-                    <div className="space-y-4">
-                      <h3 className="text-lg font-medium">Order History</h3>
-                      <p className="text-muted-foreground">No orders found.</p>
+                    <div className="space-y-6">
+                      <h3 className="text-lg sm:text-xl font-medium">Order History</h3>
+                      <div className="space-y-4">
+                        <p className="text-muted-foreground text-sm sm:text-base">No orders found.</p>
+                        <Button variant="secondary" className="w-full sm:w-auto" onClick={() => navigate("/products")}>
+                          <ShoppingBag className="w-4 h-4 mr-2" />
+                          Browse Products
+                        </Button>
+                      </div>
                     </div>
                   </TabsContent>
 
                   <TabsContent value="security">
-                    <div className="space-y-4">
-                      <h3 className="text-lg font-medium">Security Settings</h3>
-                      <form className="space-y-4">
+                    <div className="space-y-6">
+                      <h3 className="text-lg sm:text-xl font-medium">Security Settings</h3>
+                      <form className="space-y-6 max-w-md">
                         <div className="space-y-2">
-                          <Label htmlFor="currentPassword">Current Password</Label>
-                          <Input type="password" id="currentPassword" />
+                          <Label htmlFor="currentPassword" className="text-sm sm:text-base">Current Password</Label>
+                          <Input 
+                            type="password" 
+                            id="currentPassword"
+                            className="h-9 sm:h-10" 
+                          />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="newPassword">New Password</Label>
-                          <Input type="password" id="newPassword" />
+                          <Label htmlFor="newPassword" className="text-sm sm:text-base">New Password</Label>
+                          <Input 
+                            type="password" 
+                            id="newPassword"
+                            className="h-9 sm:h-10" 
+                          />
                         </div>
-                        <Button type="submit">Update Password</Button>
+                        <Button type="submit" className="w-full sm:w-auto">Update Password</Button>
                       </form>
                     </div>
                   </TabsContent>
@@ -298,28 +339,39 @@ export default function Profile() {
 
       {/* OTP Verification Dialog */}
       <Dialog open={otpDialogOpen} onOpenChange={setOtpDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>OTP Verification</DialogTitle>
-            <DialogDescription>
+        <DialogContent className="w-[90%] max-w-[425px] p-4 sm:p-6">
+          <DialogHeader className="space-y-3">
+            {/* <DialogTitle className="text-xl sm:text-2xl text-center">OTP Verification</DialogTitle>
+            <DialogDescription className="text-center text-sm sm:text-base">
               Enter the OTP sent to your email to update your profile.
-            </DialogDescription>
+            </DialogDescription> */}
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="otp" className="text-right">
-                OTP
-              </Label>
-              <Input
-                type="text"
-                id="otp"
+            <div className="flex flex-col space-y-4">
+              <Label className="text-center">Enter OTP</Label>
+              <p className="text-sm text-muted-foreground text-center px-2">
+                Please enter the 6-digit code sent to your email
+              </p>
+              <InputOTP
+                maxLength={6}
                 value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                className="col-span-3"
+                onChange={setOtp}
+                render={({ slots }) => (
+                  <InputOTPGroup className="gap-2 sm:gap-3 justify-center max-w-[280px] mx-auto">
+                    {slots.map((slot, index) => (
+                      <React.Fragment key={index}>
+                        <InputOTPSlot 
+                          className="rounded-md border w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-center" 
+                          {...slot} 
+                        />
+                      </React.Fragment>
+                    ))}
+                  </InputOTPGroup>
+                )}
               />
             </div>
           </div>
-          <Button onClick={handleUpdateProfile} disabled={loading}>
+          <Button onClick={handleUpdateProfile} disabled={loading || otp.length < 6}>
             Verify OTP and Update
           </Button>
         </DialogContent>

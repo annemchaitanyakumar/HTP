@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Navbar } from '@/components/Navbar';
@@ -6,32 +6,133 @@ import { Product3D } from '@/components/Product3D';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Carousel } from "@/components/ui/carousel-simple";
 import { ShoppingCart, ArrowLeft, Star } from 'lucide-react';
-import { products } from '@/data/products';
 import { useCartStore } from '@/store/cartStore';
 import { useToast } from '@/hooks/use-toast';
 import { Link } from 'react-router-dom';
+import axios from '../lib/axios';
+import { productService } from '@/services/productService';
 
 export default function ProductDetail() {
-  const { id } = useParams();
+  const { slug } = useParams();
   const [quantity, setQuantity] = useState(1);
+  const [product, setProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedWeight, setSelectedWeight] = useState(null);
+  const [selectedPrice, setSelectedPrice] = useState(null);
   const addItem = useCartStore(state => state.addItem);
   const { toast } = useToast();
 
-  const product = products.find(p => p.id === id);
-  console.log('Looking for product with id:', id);
+  // Debug log the received slug parameter
+  console.log('URL parameter:', useParams());
 
-  if (!product) {
+  const fetchPresignedUrls = async (productId) => {
+    const presignedUrlsUrl = `http://localhost:8000/api/products/${productId}/presigned-urls/`;
+    try {
+      const response = await axios.get(presignedUrlsUrl);
+      console.log(`Presigned URLs for product ${productId}:`, response.data);
+      return response.data;
+    } catch (error) {
+      console.error(`Failed to fetch presigned URLs for product ${productId}:`, error);
+      throw error;
+    }
+  };
+
+  useEffect(() => {
+    const fetchProduct = async () => {
+      console.log('Fetching product with slug:', slug);
+      try {
+        // Get product data using the slug
+        const productData = await productService.getProduct(slug);
+        console.log('Found product:', productData);
+        
+        if (productData) {
+          console.log('Found product by slug:', productData);
+          try {
+            // Get presigned URLs using the product's ID
+            const presignedUrlsResponse = await fetchPresignedUrls(productData.id);
+            
+            setProduct({
+              ...productData,
+              product_image1_url: presignedUrlsResponse.image1_url,
+              product_image2_url: presignedUrlsResponse.image2_url,
+              product_image3_url: presignedUrlsResponse.image3_url,
+              product_image4_url: presignedUrlsResponse.image4_url,
+              product_image5_url: presignedUrlsResponse.image5_url,
+            });
+          } catch (imageError) {
+            console.error('Failed to fetch image URLs:', imageError);
+            // If image fetching fails, still show the product with original URLs
+            setProduct(productData);
+          }
+        } else {
+          toast({
+            variant: "destructive",
+            title: "Product not found",
+            description: "The requested product could not be found.",
+          });
+          setProduct(null);
+        }
+      } catch (error) {
+        console.error('Error fetching product detail:', error);
+        if (error.response) {
+          console.error('Backend response:', error.response.data);
+          console.error('Status code:', error.response.status);
+          console.error('Headers:', error.response.headers);
+        }
+        toast({
+          variant: "destructive",
+          title: "Error loading product",
+          description: "There was an error loading the product details. Please try again.",
+        });
+        setProduct(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchProduct();
+  }, [slug, toast]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-warm flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-lg font-medium">Loading product details...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!product && !loading) {
     return <Navigate to="/products" replace />;
   }
 
   const handleAddToCart = () => {
-    for (let i = 0; i < quantity; i++) {
-      addItem(product);
+    if (product.price_by_weight && !selectedWeight) {
+      toast({
+        variant: "destructive",
+        title: "Please select weight",
+        description: "You must select a weight option before adding to cart.",
+      });
+      return;
     }
+
+    const itemToAdd = {
+      ...product,
+      selectedWeight,
+      selectedPrice,
+      finalPrice: product.price_by_weight ? selectedPrice : product.product_price
+    };
+
+    for (let i = 0; i < quantity; i++) {
+      addItem(itemToAdd);
+    }
+    
     toast({
       title: 'Added to cart',
-      description: `${quantity} ${product.name}(s) added to your cart.`,
+      description: `${quantity} ${product.product_name}${selectedWeight ? ` (${selectedWeight}g)` : ''} added to your cart.`,
     });
   };
 
@@ -72,13 +173,19 @@ export default function ProductDetail() {
               transition={{ delay: 0.2 }}
               className="space-y-6"
             >
-              {/* Main Product Image */}
+              {/* Main Product Images Carousel */}
               <Card className="overflow-hidden">
                 <CardContent className="p-0">
-                  <img
-                    src={product.image}
-                    alt={product.name}
-                    className="w-full h-96 object-cover"
+                  <Carousel 
+                    images={[
+                      product.product_image1_url,
+                      product.product_image2_url,
+                      product.product_image3_url,
+                      product.product_image4_url,
+                      product.product_image5_url
+                    ].filter(Boolean)}
+                    className="rounded-lg"
+                    autoPlayInterval={5000} // Changes image every 5 seconds
                   />
                 </CardContent>
               </Card>
@@ -88,8 +195,8 @@ export default function ProductDetail() {
                 <CardContent className="p-6">
                   <h3 className="text-lg font-semibold mb-4">3D Product View</h3>
                   <Product3D 
-                    productName={product.name} 
-                    color={getColorForProduct(product.name)}
+                    productName={product.product_name || product.name} 
+                    color={getColorForProduct(product.product_name || product.name)}
                   />
                   <p className="text-sm text-muted-foreground mt-2 text-center">
                     Drag to rotate • Scroll to zoom
@@ -107,13 +214,13 @@ export default function ProductDetail() {
             >
               <div>
                 <Badge
-                  variant={product.category === 'non-veg' ? 'destructive' : 'secondary'}
+                  variant={product.category && product.category.toUpperCase() === 'NON-VEG' ? 'destructive' : 'secondary'}
                   className="mb-4"
                 >
-                  {product.category === 'non-veg' ? 'Non-Vegetarian' : 'Vegetarian'}
+                  {product.category && product.category.toUpperCase() === 'NON-VEG' ? 'Non-Vegetarian' : 'Vegetarian'}
                 </Badge>
                 
-                <h1 className="text-4xl font-bold mb-4">{product.name}</h1>
+                <h1 className="text-4xl font-bold mb-4">{product.product_name || product.name}</h1>
                 
                 <div className="flex items-center gap-2 mb-4">
                   <div className="flex items-center">
@@ -125,63 +232,98 @@ export default function ProductDetail() {
                 </div>
 
                 <p className="text-3xl font-bold text-primary mb-6">
-                  ₹{product.price}
-                  <span className="text-lg font-normal text-muted-foreground ml-2">
-                    / {product.weight}
-                  </span>
+                  ₹{product.product_price || product.price}
+                  {product.product_stock_quantity && (
+                    <span className="text-lg font-normal text-muted-foreground ml-2">
+                      • Stock: {product.product_stock_quantity}
+                    </span>
+                  )}
                 </p>
 
                 <p className="text-lg text-muted-foreground mb-6">
-                  {product.description}
+                  {product.product_description || product.description}
                 </p>
               </div>
 
-              {/* Ingredients */}
-              <Card>
-                <CardContent className="p-6">
-                  <h3 className="text-lg font-semibold mb-4">Ingredients</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {product.ingredients.map((ingredient, index) => (
-                      <Badge key={index} variant="outline">
-                        {ingredient}
-                      </Badge>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Quantity and Add to Cart */}
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-4 mb-6">
-                    <label className="text-sm font-medium">Quantity:</label>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                      >
-                        -
-                      </Button>
-                      <span className="w-12 text-center font-medium">{quantity}</span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setQuantity(quantity + 1)}
-                      >
-                        +
-                      </Button>
+              {/* Ingredients (if available) */}
+              {(product.ingredients || product.product_ingredients) && (
+                <Card>
+                  <CardContent className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">Ingredients</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {(product.ingredients || product.product_ingredients).map((ingredient, index) => (
+                        <Badge key={index} variant="outline">
+                          {ingredient}
+                        </Badge>
+                      ))}
                     </div>
-                  </div>
+                  </CardContent>
+                </Card>
+              )}
 
-                  <Button
-                    onClick={handleAddToCart}
-                    size="lg"
-                    className="w-full gradient-primary text-primary-foreground"
-                  >
-                    <ShoppingCart className="h-5 w-5 mr-2" />
-                    Add to Cart - ₹{product.price * quantity}
-                  </Button>
+              {/* Weight Selection and Add to Cart */}
+              <Card>
+                <CardContent className="p-6">
+                  <div className="space-y-6">
+                    {/* Weight Selection */}
+                    {product.price_by_weight && (
+                      <div>
+                        <label className="text-sm font-medium block mb-3">Select Weight:</label>
+                        <div className="grid grid-cols-2 gap-3">
+                          {Object.entries(product.price_by_weight).map(([weight, price]) => (
+                            <Button
+                              key={weight}
+                              variant={selectedWeight === weight ? "default" : "outline"}
+                              className="w-full"
+                              onClick={() => {
+                                setSelectedWeight(weight);
+                                setSelectedPrice(price);
+                              }}
+                            >
+                              {weight}g - ₹{price}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Quantity Selection */}
+                    <div className="flex items-center gap-4">
+                      <label className="text-sm font-medium">Quantity:</label>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                        >
+                          -
+                        </Button>
+                        <span className="w-12 text-center font-medium">{quantity}</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setQuantity(quantity + 1)}
+                        >
+                          +
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Add to Cart Button */}
+                    <Button
+                      onClick={handleAddToCart}
+                      size="lg"
+                      className="w-full gradient-primary text-primary-foreground"
+                      disabled={product.price_by_weight && !selectedWeight}
+                    >
+                      <ShoppingCart className="h-5 w-5 mr-2" />
+                      {product.price_by_weight ? (
+                        `Add to Cart - ₹${selectedPrice * quantity} (${selectedWeight}g)`
+                      ) : (
+                        `Add to Cart - ₹${product.product_price * quantity}`
+                      )}
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
 

@@ -5,9 +5,75 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Trash2, Plus, Minus, ShoppingBag } from 'lucide-react';
 import { useCartStore } from '@/store/cartStore';
 import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 
 export default function Cart() {
-  const { items, removeItem, incrementQuantity, decrementQuantity, getTotalPrice, clearCart } = useCartStore();
+  const { items, removeItem, incrementQuantity, decrementQuantity, getTotalPrice, clearCart, setItems } = useCartStore();
+  const [urlExpiryTimes, setUrlExpiryTimes] = useState({});
+  const REFRESH_BUFFER = 300; // Refresh 5 minutes before expiry
+
+  // Log cart items for debugging
+  useEffect(() => {
+    console.log('Cart items:', items.map(item => ({
+      id: item.id,
+      name: item.name,
+      image: item.image,
+      price: item.price,
+      weight: item.weight,
+      category: item.category,
+      quantity: item.quantity
+    })));
+  }, [items]);
+
+  // Fetch presigned URLs for a product
+  const fetchPresignedUrls = async (productId) => {
+    const presignedUrlsUrl = `http://localhost:8000/api/products/${productId}/presigned-urls/`;
+    try {
+      const response = await fetch(presignedUrlsUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch presigned URLs for product ${productId}`);
+      }
+      const data = await response.json();
+      console.log(`Presigned URLs for product ${productId}:`, data);
+      return data.image1_url; // Only need image1_url for Cart
+    } catch (error) {
+      console.error(`Error fetching presigned URLs for product ${productId}:`, error);
+      return null;
+    }
+  };
+
+  // Refresh expired URLs
+  useEffect(() => {
+    const checkAndRefreshUrls = async () => {
+      const now = Date.now();
+      const itemsToRefresh = items.filter(item => {
+        const expiryTime = urlExpiryTimes[item.id];
+        return !expiryTime || now >= (expiryTime - REFRESH_BUFFER * 1000);
+      });
+
+      if (itemsToRefresh.length > 0) {
+        const updatedItems = await Promise.all(
+          itemsToRefresh.map(async (item) => {
+            const newImageUrl = await fetchPresignedUrls(item.id);
+            if (newImageUrl) {
+              setUrlExpiryTimes(prev => ({
+                ...prev,
+                [item.id]: Date.now() + 3600000 // 1 hour expiry
+              }));
+              return { ...item, image: newImageUrl };
+            }
+            return { ...item, image: '/placeholder.png' }; // Fallback if refresh fails
+          })
+        );
+
+        // Update cart items with new URLs
+        setItems(updatedItems);
+      }
+    };
+
+    const intervalId = setInterval(checkAndRefreshUrls, REFRESH_BUFFER * 1000);
+    return () => clearInterval(intervalId);
+  }, [items, urlExpiryTimes, setItems]);
 
   if (items.length === 0) {
     return (
@@ -85,22 +151,23 @@ export default function Cart() {
                       <CardContent className="p-6">
                         <div className="flex items-center gap-4">
                           <img
-                            src={
-                              item.image
-                                ? item.image.replace('https%3A/', 'https:/') // Fix double-encoded URLs
-                                : '/placeholder.png'
-                            }
+                            src={item.image || '/placeholder.png'}
                             alt={item.name}
                             className="w-20 h-20 object-cover rounded-lg"
                             onError={e => {
+                              console.error(`Image failed to load for ${item.name} (ID: ${item.id}):`, {
+                                imageUrl: item.image,
+                                error: e.message
+                              });
                               e.target.src = '/placeholder.png';
                               e.target.onerror = null;
                             }}
+                            loading="lazy"
                           />
                           
                           <div className="flex-1">
                             <h3 className="text-lg font-semibold">{item.name}</h3>
-                            <p className="text-muted-foreground">{item.weight}</p>
+                            <p className="text-muted-foreground">{item.weight ? `${item.weight}g` : item.category}</p>
                             <p className="text-2xl font-bold text-primary">₹{item.price}</p>
                           </div>
 

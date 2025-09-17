@@ -30,7 +30,7 @@ const getMainPrice = (product) => {
 export const SearchResults = memo(
   forwardRef(({ results, onClose }, ref) => {
     const { addItem, incrementQuantity, decrementQuantity, items } = useCartStore();
-    const navigate = useNavigate(); // Add this
+    const navigate = useNavigate();
 
     const getItemQuantity = (productId) => {
       const item = items.find((item) => item.id === productId);
@@ -45,12 +45,11 @@ export const SearchResults = memo(
         id: product.id,
         name: product.product_name,
         price: Number(price),
-        image: product.product_image1,
+        image: product.product_image1_url || '/placeholder.png',
         weight,
         category: product.category,
         quantity: 1
       });
-      // Do NOT call onClose() here!
     };
 
     const handleIncrement = (e, productId) => {
@@ -89,20 +88,17 @@ export const SearchResults = memo(
                 key={product.id}
                 className="flex items-center gap-4 p-3 hover:bg-muted/50 transition-colors"
               >
-                {/* Only this part is clickable for navigation */}
+                {/* Clickable area for navigation */}
                 <div
                   className="flex items-center gap-4 flex-1 cursor-pointer"
                   onClick={(e) => handleProductClick(e, product.id)}
                 >
                   <img
-                    src={
-                      product.product_image1
-                        ? product.product_image1.replace('https%3A/', 'https:/')
-                        : '/placeholder.png'
-                    }
+                    src={product.product_image1_url || '/placeholder.png'}
                     alt={product.product_name}
                     className="w-16 h-16 object-cover rounded-md"
                     onError={(e) => {
+                      console.error('Image failed to load:', product.id, e.target.src);
                       e.target.src = '/placeholder.png';
                       e.target.onerror = null;
                     }}
@@ -110,9 +106,9 @@ export const SearchResults = memo(
                   <div className="flex-1 min-w-0">
                     <h4 className="font-medium text-sm">{product.product_name}</h4>
                     <p className="text-primary text-base font-semibold">
-                      ₹{getMainPrice(product).price}
-                      {getMainPrice(product).weight && (
-                        <span className="text-xs text-gray-500"> / {getMainPrice(product).weight}g</span>
+                      ₹{price}
+                      {weight && (
+                        <span className="text-xs text-gray-500"> / {weight}g</span>
                       )}
                     </p>
                     <p className="text-muted-foreground text-xs line-clamp-2 mt-1">
@@ -120,7 +116,7 @@ export const SearchResults = memo(
                     </p>
                   </div>
                 </div>
-                {/* Add button is NOT inside the clickable area */}
+                {/* Add to cart controls */}
                 <div className="flex items-center gap-2 pr-2">
                   {getItemQuantity(product.id) > 0 ? (
                     <div className="flex items-center gap-1">
@@ -172,10 +168,12 @@ SearchResults.propTypes = {
   results: PropTypes.arrayOf(
     PropTypes.shape({
       id: PropTypes.string.isRequired,
-      name: PropTypes.string.isRequired,
-      price: PropTypes.number.isRequired,
-      image: PropTypes.string.isRequired,
-      description: PropTypes.string.isRequired,
+      product_name: PropTypes.string.isRequired,
+      product_price: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+      price_by_weight: PropTypes.oneOfType([PropTypes.object, PropTypes.string]),
+      product_image1_url: PropTypes.string,
+      product_description: PropTypes.string.isRequired,
+      category: PropTypes.string.isRequired,
     })
   ).isRequired,
   onClose: PropTypes.func.isRequired,
