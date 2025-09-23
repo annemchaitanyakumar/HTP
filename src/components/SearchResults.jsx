@@ -33,41 +33,68 @@ export const SearchResults = memo(
     const navigate = useNavigate();
 
     const getItemQuantity = (productId) => {
-      const item = items.find((item) => item.id === productId);
+      const item = items.find((item) => item.productId === productId);
       return item ? item.quantity : 0;
     };
 
-    const handleAddToCart = (e, product) => {
+    const handleAddToCart = async (e, product) => {
       e.stopPropagation();
       e.preventDefault();
-      const { price, weight } = getMainPrice(product);
-      addItem({
-        id: product.id,
-        name: product.product_name,
-        price: Number(price),
-        image: product.product_image1_url || '/placeholder.png',
-        weight,
-        category: product.category,
-        quantity: 1
-      });
+      try {
+        const { price, weight } = getMainPrice(product);
+        
+        // Debug the values before sending
+        console.log('Adding product:', {
+          id: product.id,
+          name: product.product_name,
+          price,
+          weight,
+          category: product.category
+        });
+
+        if (!product.id) {
+          console.error('Product ID is missing:', product);
+          return;
+        }
+
+        await addItem({
+          id: product.id,
+          product_name: product.product_name,
+          price_by_weight: { [weight]: price },
+          category: product.category,
+          product_image1_url: product.product_image1_url || '/placeholder.png',
+          slug: product.slug || product.product_name.toLowerCase().replace(/\s+/g, '-'),
+          quantity: 1,
+          weight: weight
+        });
+      } catch (error) {
+        console.error('Error adding item to cart:', error);
+      }
     };
 
-    const handleIncrement = (e, productId) => {
+    const handleIncrement = async (e, productId) => {
       e.stopPropagation();
       e.preventDefault();
-      incrementQuantity(productId);
+      const item = items.find(item => item.productId === productId);
+      if (item) {
+        await incrementQuantity(item.cartId);
+      }
     };
 
-    const handleDecrement = (e, productId) => {
+    const handleDecrement = async (e, productId) => {
       e.stopPropagation();
       e.preventDefault();
-      decrementQuantity(productId);
+      const item = items.find(item => item.productId === productId);
+      if (item) {
+        await decrementQuantity(item.cartId);
+      }
     };
 
-    const handleProductClick = (e, productId) => {
+    const handleProductClick = (e, product) => {
       e.preventDefault();
       onClose();
-      navigate(`/products/${productId}`);
+      const slug = product.slug || product.product_name.toLowerCase().replace(/\s+/g, '-');
+      navigate(`/products/${slug}`);
     };
 
     if (results.length === 0) return null;
@@ -90,13 +117,13 @@ export const SearchResults = memo(
               >
                 {/* Clickable area for navigation */}
                 <div
-                  className="flex items-center gap-4 flex-1 cursor-pointer"
-                  onClick={(e) => handleProductClick(e, product.id)}
+                  className="flex items-center gap-4 flex-1 cursor-pointer group"
+                  onClick={(e) => handleProductClick(e, product)}
                 >
                   <img
                     src={product.product_image1_url || '/placeholder.png'}
                     alt={product.product_name}
-                    className="w-16 h-16 object-cover rounded-md"
+                    className="w-16 h-16 object-cover rounded-md hover:opacity-75 transition-opacity"
                     onError={(e) => {
                       console.error('Image failed to load:', product.id, e.target.src);
                       e.target.src = '/placeholder.png';
@@ -104,7 +131,7 @@ export const SearchResults = memo(
                     }}
                   />
                   <div className="flex-1 min-w-0">
-                    <h4 className="font-medium text-sm">{product.product_name}</h4>
+                    <h4 className="font-medium text-sm group-hover:text-primary transition-colors">{product.product_name}</h4>
                     <p className="text-primary text-base font-semibold">
                       ₹{price}
                       {weight && (

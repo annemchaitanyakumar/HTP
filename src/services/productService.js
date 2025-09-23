@@ -5,8 +5,17 @@ import { slugify } from '@/lib/slugify';
 class ProductService {
     async getAllProducts() {
         try {
-            const response = await axios.get('/api/get-all-products');
-            // Add slug to each product and ensure we use product_name
+            const response = await axios.get('/api/get-all-products', {
+                // Force bypass cache and get fresh data
+                headers: {
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0'
+                }
+            });
+            
+            console.log('Raw API response:', response.data);
+            
             const productsWithSlugs = response.data.map(product => {
                 // Make sure we have a product name to create a slug from
                 if (!product.product_name) {
@@ -14,12 +23,24 @@ class ProductService {
                 }
                 const productName = product.product_name || product.name || `product-${product.id}`;
                 const slug = slugify(productName);
-                console.log(`Created slug for product ${product.id}: ${slug} from name: ${productName}`);
+                
+                // Ensure stock quantity is a number and default to 0
+                let stock = 0;
+                if (product.product_stock_quantity !== null && product.product_stock_quantity !== undefined) {
+                    stock = typeof product.product_stock_quantity === 'string' 
+                        ? parseInt(product.product_stock_quantity, 10) 
+                        : product.product_stock_quantity;
+                }
+                
+                console.log(`Product ${productName} (ID: ${product.id}) - Raw stock: ${product.product_stock_quantity}, Processed stock: ${stock}`);
+                
                 return {
                     ...product,
+                    product_stock_quantity: stock,
                     slug
                 };
             });
+            
             return productsWithSlugs;
         } catch (error) {
             console.error('Error fetching products:', error);
@@ -55,6 +76,18 @@ class ProductService {
             return product;
         } catch (error) {
             console.error('Error fetching product:', error);
+            throw error;
+        }
+    }
+
+    async fetchPresignedUrls(productId) {
+        try {
+            console.log('Fetching presigned URLs for product:', productId);
+            const response = await axios.post('/api/get-s3-presigned-urls', { product_id: productId });
+            console.log('Received presigned URLs:', response.data);
+            return response.data;
+        } catch (error) {
+            console.error('Error fetching presigned URLs:', error);
             throw error;
         }
     }

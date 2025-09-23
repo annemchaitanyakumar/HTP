@@ -191,7 +191,7 @@ export default function Login() {
                 <Card className="border-2">
                   <CardHeader>
                     <CardTitle className="text-2xl text-center">
-                      Welcome back to <span className="gradient-primary bg-clip-text text-transparent">Homely Taste</span>
+                      Welcome back to <span className="gradient-primary bg-clip-text text-transparent">HT Pickles</span>
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -267,7 +267,7 @@ export default function Login() {
                 transition={{ duration: 0.5, delay: 0.2 }}
                 className="text-center space-y-6 p-8 max-w-md mx-auto w-full"
               >
-                <h2 className="text-3xl font-bold">New to Homely Taste?</h2>
+                <h2 className="text-3xl font-bold">New to HT Pickles?</h2>
                 <p className="text-muted-foreground text-lg">
                   Join our community and discover the authentic taste of homemade pickles.
                 </p>

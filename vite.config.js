@@ -9,38 +9,40 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 3000,
     proxy: {
-      // Default: Send all /api requests to Spring Boot (4040)
       '/api': {
         target: 'http://localhost:4040',
         changeOrigin: true,
         secure: false,
+        ws: true,
         configure: (proxy, options) => {
           proxy.on('proxyReq', (proxyReq, req, res) => {
+            // Forward the Authorization header
             if (req.headers.authorization) {
               proxyReq.setHeader('Authorization', req.headers.authorization);
             }
+
             proxyReq.setHeader('Content-Type', 'application/json');
-          });
-          
-          proxy.on('error', (err, req, res) => {
-            console.error('Spring Boot Proxy Error:', err);
-          });
-        }
-      },
-      // Override: Send image-related requests to Django (8000)
-      '/api/images': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-        secure: false,
-        configure: (proxy, options) => {
-          proxy.on('proxyReq', (proxyReq, req, res) => {
-            if (req.headers.authorization) {
-              proxyReq.setHeader('Authorization', req.headers.authorization);
+            
+            if (req.body) {
+              let bodyData = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+              proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+              proxyReq.write(bodyData);
             }
           });
-          
+
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            // Log proxy response for debugging
+            console.log(`[Proxy] ${req.method} ${req.url} -> ${proxyRes.statusCode}`);
+          });
+
           proxy.on('error', (err, req, res) => {
-            console.error('Django Proxy Error:', err);
+            console.error('Proxy error:', err);
+            if (!res.headersSent) {
+              res.writeHead(500, {
+                'Content-Type': 'application/json'
+              });
+              res.end(JSON.stringify({ error: 'Proxy error occurred' }));
+            }
           });
         }
       }

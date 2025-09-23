@@ -46,9 +46,16 @@ export const Navbar = () => {
               <div className="w-8 h-8 gradient-primary rounded-full flex items-center justify-center">
                 <span className="text-primary-foreground font-bold text-lg">HT</span>
               </div>
-              <span className="text-xl font-bold gradient-primary bg-clip-text text-transparent">
-                Homely Taste Pickles
-              </span>
+              <div className="flex flex-col">
+                {/* For mobile screens (xs to sm) */}
+                <span className="sm:hidden text-lg font-bold gradient-primary bg-clip-text text-transparent">
+                  HT Pickles
+                </span>
+                {/* For larger screens (sm and up) */}
+                <span className="hidden sm:block text-xl font-bold gradient-primary bg-clip-text text-transparent">
+                  Homely Taste Pickles
+                </span>
+              </div>
             </motion.div>
           </Link>
 
@@ -171,15 +178,41 @@ export const Navbar = () => {
                     {item.name}
                   </Link>
                 ))}
-                <div className="flex items-center space-x-2 pt-4 border-t border-border">
-                  <Link to="/login" className="w-full" onClick={() => setIsMenuOpen(false)}>
-                    <Button 
-                      className="w-full bg-gradient-to-r from-secondary to-primary text-primary-foreground hover:opacity-90 transition-opacity shadow-warm"
-                    >
-                      <User className="w-4 h-4 mr-2" />
-                      Login
-                    </Button>
-                  </Link>
+                <div className="flex flex-col space-y-2 pt-4 border-t border-border">
+                  {isAuthenticated ? (
+                    <>
+                      <Link to="/profile" className="w-full" onClick={() => setIsMenuOpen(false)}>
+                        <Button 
+                          variant="ghost"
+                          className="w-full text-muted-foreground hover:bg-secondary/10 hover:text-secondary transition-colors"
+                        >
+                          <User className="h-4 w-4 mr-2" />
+                          {user?.firstname || user?.emailid || 'Account'}
+                        </Button>
+                      </Link>
+                      <Button 
+                        variant="ghost"
+                        className="w-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                        onClick={() => {
+                          logout();
+                          setIsMenuOpen(false);
+                          navigate('/');
+                        }}
+                      >
+                        <LogOut className="h-4 w-4 mr-2" />
+                        Logout
+                      </Button>
+                    </>
+                  ) : (
+                    <Link to="/login" className="w-full" onClick={() => setIsMenuOpen(false)}>
+                      <Button 
+                        className="w-full bg-gradient-to-r from-secondary to-primary text-primary-foreground hover:opacity-90 transition-opacity shadow-warm"
+                      >
+                        <User className="w-4 h-4 mr-2" />
+                        Login
+                      </Button>
+                    </Link>
+                  )}
                 </div>
               </div>
             </motion.div>

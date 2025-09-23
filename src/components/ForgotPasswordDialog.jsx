@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from "@/hooks/use-toast";
+import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Dialog,
   DialogContent,
@@ -10,6 +11,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { 
+  InputOTP, 
+  InputOTPGroup, 
+  InputOTPSlot 
+} from "@/components/ui/input-otp";
 
 export function ForgotPasswordDialog({ isOpen, onClose }) {
   const [step, setStep] = useState(1); // 1: email, 2: OTP, 3: new password
@@ -19,6 +25,7 @@ export function ForgotPasswordDialog({ isOpen, onClose }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
+  const isMobile = useIsMobile();
 
   const handleSubmitEmail = async (e) => {
     e.preventDefault();
@@ -109,6 +116,10 @@ export function ForgotPasswordDialog({ isOpen, onClose }) {
       });
       onClose();
       setStep(1);
+      setEmail('');
+      setOtp('');
+      setNewPassword('');
+      setConfirmPassword('');
     } catch (error) {
       toast({
         variant: "destructive",
@@ -122,17 +133,17 @@ export function ForgotPasswordDialog({ isOpen, onClose }) {
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className={`${isMobile && step === 2 ? 'w-[90%] max-w-[300px]' : 'w-[90%] sm:w-[425px] max-w-sm'} mx-auto rounded-xl p-4 overflow-x-hidden`}>
         <DialogHeader>
-          <DialogTitle>
-            {step === 1 ? "Forgot Password" : 
-             step === 2 ? "Verify OTP" : 
-             "Reset Password"}
+          <DialogTitle className="text-center text-sm sm:text-base">
+            {step === 1 ? "Forgot Password" : step === 2 ? "Verify OTP" : "Reset Password"}
           </DialogTitle>
-          <DialogDescription>
-            {step === 1 ? "Enter your email to receive a verification code" :
-             step === 2 ? "Enter the OTP sent to your email" :
-             "Enter your new password"}
+          <DialogDescription className="text-center text-xs sm:text-sm">
+            {step === 1
+              ? "Enter your email to receive a verification code"
+              : step === 2
+              ? "Enter the OTP sent to your email"
+              : "Enter your new password"}
           </DialogDescription>
         </DialogHeader>
 
@@ -155,19 +166,49 @@ export function ForgotPasswordDialog({ isOpen, onClose }) {
         )}
 
         {step === 2 && (
-          <form onSubmit={handleVerifyOtp} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="otp">OTP</Label>
-              <Input
-                id="otp"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                required
-              />
+          <form onSubmit={handleVerifyOtp} className="w-full mt-4 flex flex-col items-center gap-4">
+            <Label className="text-center text-xs sm:text-sm">Enter OTP</Label>
+            {isMobile ? (
+              <div className="w-full max-w-[90%] mx-auto">
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={otp}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (/^\d*$/.test(value) && value.length <= 6) setOtp(value);
+                  }}
+                  placeholder="Enter 6-digit OTP"
+                  className="w-full text-center text-lg h-10"
+                />
+              </div>
+            ) : (
+              <div className="w-full max-w-[300px] mx-auto">
+                <InputOTP
+                  value={otp}
+                  onChange={setOtp}
+                  maxLength={6}
+                  render={({ slots }) => (
+                    <InputOTPGroup>
+                      {slots.map((slot, idx) => (
+                        <InputOTPSlot key={idx} {...slot} />
+                      ))}
+                    </InputOTPGroup>
+                  )}
+                />
+              </div>
+            )}
+            <div className="w-full max-w-[90%] mx-auto">
+              <Button
+                type="submit"
+                className="w-full h-10 text-sm font-medium bg-gradient-to-r from-orange-400 to-orange-600 hover:from-orange-500 hover:to-orange-700"
+                disabled={loading}
+              >
+                {loading ? "Verifying..." : "Verify OTP"}
+              </Button>
             </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Verifying..." : "Verify OTP"}
-            </Button>
           </form>
         )}
 

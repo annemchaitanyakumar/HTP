@@ -12,6 +12,7 @@ import { authService } from '@/services/authService';
 export default function SignUp() {
   const navigate = useNavigate();
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [showOtpForm, setShowOtpForm] = useState(false);
   const [formData, setFormData] = useState({
@@ -21,14 +22,15 @@ export default function SignUp() {
     password: '',
     confirmPassword: '',
     mobilenum: '',
-    otp: ''
+    otp: '',
+    role: 'CUSTOMER'
   });
 
   const handleInputChange = (e) => {
     const { id, value } = e.target;
-    
+    console.log(`[SignUp] Input changed: ${id} = ${value}`);
+
     if (id === 'mobilenum') {
-      // Only allow numbers and limit to 10 digits
       const numericValue = value.replace(/\D/g, '').slice(0, 10);
       setFormData(prev => ({ ...prev, [id]: numericValue }));
     } else {
@@ -39,7 +41,9 @@ export default function SignUp() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
     setLoading(true);
+    console.log('[SignUp] Form submitted:', { showOtpForm, formData });
 
     try {
       // Validate form data
@@ -65,53 +69,94 @@ export default function SignUp() {
 
       if (!showOtpForm) {
         try {
-          // First step: Register and send OTP
           const registrationData = {
             firstname: formData.firstname,
             lastname: formData.lastname,
             emailid: formData.emailid,
             password: formData.password,
-            mobilenum: parseInt(formData.mobilenum, 10)
+            mobilenum: parseInt(formData.mobilenum, 10),
+            role: formData.role
           };
+          console.log('[SignUp] Sending registration request:', registrationData);
+          
           const response = await authService.register(registrationData);
+          console.log('[SignUp] Registration response:', response);
+          
+          setSuccess(response.message);
           setShowOtpForm(true);
-          setError(response.message || 'OTP has been sent to your email. Please verify to complete registration.');
         } catch (err) {
+          console.error('[SignUp] Registration error:', err);
+          let errorMessage = err.message;
+          
           if (err.message.includes('Database connection')) {
-            setError('Our servers are busy. Please try again in a few minutes.');
-          } else {
-            setError(err.message);
+            errorMessage = 'Our servers are busy. Please try again in a few minutes.';
+          } else if (err.message.includes('already exists')) {
+            errorMessage = 'An account with this email already exists.';
           }
-          throw err; // Re-throw to prevent state changes
+          
+          setError(errorMessage);
+          setLoading(false);
         }
       } else {
-        // Second step: Verify OTP
         if (!formData.otp) {
           throw new Error('Please enter the OTP sent to your email');
         }
         try {
-          await authService.verifyOtp(formData); // Pass the complete form data
-          navigate('/login');
+          console.log('[SignUp] Sending OTP verification request:', { ...formData });
+          
+          // Send all user data with OTP for verification
+          const verificationData = {
+            firstname: formData.firstname,
+            lastname: formData.lastname,
+            emailid: formData.emailid,
+            password: formData.password,
+            mobilenum: parseInt(formData.mobilenum, 10),
+            role: formData.role,
+            otp: formData.otp
+          };
+          
+          console.log('[SignUp] Verification data:', verificationData);
+          const response = await authService.verifyOtp(verificationData);
+          
+          console.log('[SignUp] OTP verification response:', response);
+          
+          const message = typeof response === 'string' ? response :
+            response?.message || 'Registration completed successfully!';
+            
+          setSuccess(message);
+          setTimeout(() => navigate('/login'), 2000); // Give user time to see success message
+          
         } catch (err) {
+          console.error('[SignUp] OTP verification error:', err);
+          let errorMessage = err.message;
+          
+          // Map specific error messages to user-friendly ones
           if (err.message.includes('Database connection')) {
-            setError('Our servers are busy. Please try again in a few minutes.');
-          } else {
-            setError(err.message);
+            errorMessage = 'Our servers are busy. Please try again in a few minutes.';
+          } else if (err.message.includes('Invalid OTP')) {
+            errorMessage = 'Invalid OTP. Please try again.';
+          } else if (err.message.includes('expired')) {
+            errorMessage = 'OTP has expired. Please request a new one.';
           }
-          throw err; // Re-throw to prevent state changes
+          
+          setError(errorMessage);
+          setLoading(false);
         }
       }
     } catch (err) {
+      console.error('[SignUp] General error:', err);
       setError(err.message || 'Failed to create account. Please try again.');
     }
 
     setLoading(false);
+    console.log('[SignUp] Form submission complete, state:', { showOtpForm, error, success });
   };
+
+  console.log('[SignUp] Rendering component, state:', { showOtpForm, error, success, formData });
 
   return (
     <div className="min-h-screen bg-gradient-warm">
       <Navbar />
-      
       <div className="pt-24 pb-16 px-4">
         <div className="container max-w-md mx-auto">
           <motion.div
@@ -132,7 +177,11 @@ export default function SignUp() {
                       <AlertDescription>{error}</AlertDescription>
                     </Alert>
                   )}
-                  
+                  {success && (
+                    <Alert variant="success">
+                      <AlertDescription>{success}</AlertDescription>
+                    </Alert>
+                  )}
                   {!showOtpForm ? (
                     <>
                       <div className="grid grid-cols-2 gap-4">
@@ -234,9 +283,13 @@ export default function SignUp() {
                     className="w-full gradient-primary text-primary-foreground"
                     disabled={loading}
                   >
-                    {loading 
-                      ? (showOtpForm ? 'Verifying OTP...' : 'Creating Account...') 
-                      : (showOtpForm ? 'Verify OTP' : 'Create Account')}
+                    {loading
+                      ? showOtpForm
+                        ? 'Verifying OTP...'
+                        : 'Creating Account...'
+                      : showOtpForm
+                        ? 'Verify OTP'
+                        : 'Create Account'}
                   </Button>
 
                   <p className="text-center text-sm text-muted-foreground">
