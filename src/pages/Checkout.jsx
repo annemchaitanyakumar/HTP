@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import PaymentButton from './PaymentButton';
 import { Navbar } from '@/components/Navbar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,7 +27,7 @@ export default function Checkout() {
     city: '',
     state: '',
     pincode: '',
-    paymentMethod: ''
+    paymentMethod: 'razorpay' // Set default payment method
   });
 
   if (items.length === 0 && !orderPlaced) {
@@ -34,18 +35,22 @@ export default function Checkout() {
   }
 
   const handleInputChange = (field, value) => {
+    console.log(`Updating ${field} with value:`, value); // Debug log
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   const handlePlaceOrder = () => {
     // Validate form
     const requiredFields = ['firstName', 'lastName', 'email', 'phone', 'address', 'city', 'state', 'pincode', 'paymentMethod'];
-    const isValid = requiredFields.every(field => formData[field]);
+    
+    // Find missing fields
+    const missingFields = requiredFields.filter(field => !formData[field]);
+    const isValid = missingFields.length === 0;
 
     if (!isValid) {
       toast({
         title: 'Missing Information',
-        description: 'Please fill in all required fields.',
+        description: `Please fill in: ${missingFields.join(', ')}`,
         variant: 'destructive'
       });
       return;
@@ -208,7 +213,10 @@ export default function Checkout() {
                     </div>
                     <div>
                       <Label htmlFor="state">State</Label>
-                      <Select onValueChange={(value) => handleInputChange('state', value)}>
+                      <Select 
+                        value={formData.state} 
+                        onValueChange={(value) => handleInputChange('state', value)}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="Select state" />
                         </SelectTrigger>
@@ -245,18 +253,24 @@ export default function Checkout() {
                     Payment Method
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <Select onValueChange={(value) => handleInputChange('paymentMethod', value)}>
+                <CardContent className="space-y-4">
+                  <Select 
+                    defaultValue="razorpay"
+                    onValueChange={(value) => handleInputChange('paymentMethod', value)}
+                  >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select payment method" />
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="razorpay">Pay with RazorPay</SelectItem>
                       <SelectItem value="cod">Cash on Delivery</SelectItem>
-                      <SelectItem value="card">Credit/Debit Card</SelectItem>
-                      <SelectItem value="upi">UPI</SelectItem>
-                      <SelectItem value="netbanking">Net Banking</SelectItem>
                     </SelectContent>
                   </Select>
+                  {formData.paymentMethod === 'razorpay' && (
+                    <div className="mt-4">
+                      <PaymentButton amount={Math.round(getTotalPrice() * 1.18)} customerInfo={formData} />
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </motion.div>
