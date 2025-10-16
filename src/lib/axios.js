@@ -2,8 +2,8 @@ import axios from 'axios';
 import { tokenService } from '@/services/tokenService';
 
 // API Base URLs
-export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-export const IMAGE_API_BASE = 'http://localhost:8000';
+export const API_BASE = `${import.meta.env.VITE_API_URL}`;
+export const IMAGE_API_BASE = `${import.meta.env.VITE_DJANGO_URL}` || 'http://localhost:8000';
 
 // Main API instance for auth, products, cart, etc.
 const instance = axios.create({
@@ -16,9 +16,9 @@ const instance = axios.create({
 // Add request interceptor to prevent caching for specific endpoints
 instance.interceptors.request.use(config => {
   // Add cache-busting for critical data endpoints
-  if (config.url?.includes('/api/get-all-products') || 
-      config.url?.includes('/api/products/') ||
-      config.url?.includes('/api/get-product')) {
+  if (config.url?.includes('/get-all-products') || 
+      config.url?.includes('/products/') ||
+      config.url?.includes('/get-product')) {
     const timestamp = new Date().getTime();
     config.params = {
       ...config.params,
@@ -103,6 +103,9 @@ const addAuthInterceptor = (axiosInstance) => {
           }
         } catch (refreshError) {
           console.error('[Axios] Token refresh error:', refreshError);
+          // Clear token and redirect to login page
+          tokenService.clearToken && tokenService.clearToken();
+          window.location.href = '/login';
         }
       }
       

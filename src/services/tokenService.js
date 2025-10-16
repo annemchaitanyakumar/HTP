@@ -89,7 +89,7 @@ export default class TokenService {
     async refreshToken() {
         try {
             console.log('[TokenService] Attempting to refresh token');
-            const response = await fetch('/api/refresh-token', {
+            const response = await fetch(`${import.meta.env.VITE_API_URL}/refresh-token`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include'

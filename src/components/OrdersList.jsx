@@ -16,6 +16,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 
 export function OrdersList({ orders }) {
+  const [openStates, setOpenStates] = useState({});
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'SUCCESS':
@@ -37,44 +39,58 @@ export function OrdersList({ orders }) {
     });
   };
 
+  const toggleAccordion = (orderId) => {
+    setOpenStates((prev) => ({
+      ...prev,
+      [orderId]: !prev[orderId],
+    }));
+  };
+
   return (
     <div className="space-y-4">
-      {orders.map((order) => (
-        <Accordion type="single" collapsible key={order.orderId}>
-          <AccordionItem value={order.orderId}>
-            <AccordionTrigger className="grid grid-cols-4 gap-4 px-4">
-              <span>Order #{order.orderId}</span>
+      {orders.map((order) => {
+        const isOpen = openStates[order.orderId] || false;
+        return (
+          <div key={order.orderId} className="border rounded-lg mb-2">
+            <button
+              className={`w-full flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50 focus:outline-none ${isOpen ? 'border-b' : ''}`}
+              onClick={() => toggleAccordion(order.orderId)}
+              aria-expanded={isOpen}
+            >
+              <span className="font-medium">Order #{order.orderId}</span>
               <span>₹{order.totalAmountPaid}</span>
               <span>{formatDate(order.createdTime)}</span>
               <Badge className={getStatusColor(order.paymentStatus)}>
                 {order.paymentStatus}
               </Badge>
-            </AccordionTrigger>
-            <AccordionContent className="px-4">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead>Weight</TableHead>
-                    <TableHead>Quantity</TableHead>
-                    <TableHead>Price</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {JSON.parse(order.productList).map((item, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{item.product_name}</TableCell>
-                      <TableCell>{item.weight}</TableCell>
-                      <TableCell>{item.quantity}</TableCell>
-                      <TableCell>₹{item.price}</TableCell>
+            </button>
+            {isOpen && (
+              <div className="px-4 pb-4 pt-2 bg-gray-50 animate-fade-in">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Product</TableHead>
+                      <TableHead>Weight</TableHead>
+                      <TableHead>Quantity</TableHead>
+                      <TableHead>Price</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
-      ))}
+                  </TableHeader>
+                  <TableBody>
+                    {JSON.parse(order.productList).map((item, index) => (
+                      <TableRow key={index}>
+                        <TableCell>{item.product_name}</TableCell>
+                        <TableCell>{item.weight}</TableCell>
+                        <TableCell>{item.quantity}</TableCell>
+                        <TableCell>₹{item.price}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

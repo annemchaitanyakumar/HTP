@@ -6,7 +6,7 @@ export const securityHeaders = {
     "style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: blob: https:; " +
     "font-src 'self' data:; " +
-    "connect-src 'self' http://localhost:4040 http://localhost:8000; " + // Add your API domains here
+    "connect-src 'self' ${import.meta.env.VITE_API_URL} ${import.meta.env.VITE_DJANGO_URL}; " +
     "frame-src 'none'; " +
     "object-src 'none';",
   'X-Content-Type-Options': 'nosniff',

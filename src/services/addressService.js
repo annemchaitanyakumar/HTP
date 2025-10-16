@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_BACKEND_URL ? `${import.meta.env.VITE_BACKEND_URL}/api` : 'http://localhost:4040/api';
+const API_BASE = import.meta.env.VITE_BACKEN_URL ? `${import.meta.env.VITE_DJANGO_URL}/api` : `${import.meta.env.VITE_API_URL}`;
 
 import { tokenService } from './tokenService';
 

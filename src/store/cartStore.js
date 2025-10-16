@@ -35,7 +35,7 @@ const useCartStore = create()(
 
       // fetch presigned URLs for images using a plain axios instance (no credentials)
       fetchPresignedUrls: async (productId) => {
-        const presignedUrlsUrl = `http://localhost:8000/api/products/${productId}/presigned-urls/`;
+        const presignedUrlsUrl = `${import.meta.env.VITE_DJANGO_URL}/products/${productId}/presigned-urls/`;
         try {
           const plain = axiosDefault.create();
           const response = await plain.get(presignedUrlsUrl, { withCredentials: false, timeout: 8000 });
@@ -225,8 +225,9 @@ const useCartStore = create()(
       updateQuantity: async (cartId, newQuantity, weight) => {
         set({ loading: true, error: null });
         try {
-
-
+          if (newQuantity > 10) {
+            throw new Error('Maximum quantity limit (10) reached for this item');
+          }
 
           const updatedItem = await cartService.updateCartItem(cartId, newQuantity, weight);
           console.log("🧾 Backend Response:", updatedItem);

@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 const DEFAULT_PLACEHOLDER = 'Search products...';
 const DEBOUNCE_MS = 300;
 const MAX_RESULTS = 10;
-const BACKEND_SEARCH_URL = 'http://localhost:4040/api/search-by-name';
+const BACKEND_SEARCH_URL = `${import.meta.env.VITE_API_URL}/search-by-name`;
 
 // helpers
 const normalizeName = (p) => {
@@ -202,7 +202,7 @@ export const SearchBar = ({ className = '', placeholder = DEFAULT_PLACEHOLDER })
 
   // Fetch presigned URLs from Django (single product)
   const fetchPresignedUrls = async (productId) => {
-    const presignedUrlsUrl = `http://localhost:8000/api/products/${productId}/presigned-urls`;
+    const presignedUrlsUrl = `${import.meta.env.VITE_BACKEND_URL}/products/${productId}/presigned-urls`;
     try {
       const resp = await fetch(presignedUrlsUrl, {
         method: 'GET',

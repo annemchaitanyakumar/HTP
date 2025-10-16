@@ -1,9 +1,10 @@
-// src/pages/ProductDetail.jsx
 import { useEffect, useState, useRef } from 'react';
+import { Pencil } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import * as HoverCard from '@radix-ui/react-hover-card';
 import { cn } from "@/lib/utils";
+import TokenService from '@/services/tokenService';
 import { Button } from '@/components/ui/button';
 import { useCartStore } from '@/store/cartStore';
 import { useToast } from '@/hooks/use-toast';
@@ -16,11 +17,13 @@ import { API_ENDPOINTS, getApiUrl } from '@/config/constants';
 
 export default function ProductDetail() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { slug } = useParams(); // expects numeric id or slug with id
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
   const [addingToCart, setAddingToCart] = useState(false);
   const [selectedVariant, setSelectedVariant] = useState(null);
+  const tokenService = new TokenService();
   const { addItem } = useCartStore();
   const { toast } = useToast();
   const imageRef = useRef(null);
@@ -37,6 +40,8 @@ export default function ProductDetail() {
   const [newRating, setNewRating] = useState(0);
   const [newComment, setNewComment] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [showAllReviews, setShowAllReviews] = useState(false);
 
   const extractIdFromSlug = (s) => {
     if (!s) return null;
@@ -57,8 +62,8 @@ export default function ProductDetail() {
 
   const fetchPresignedUrls = async (productId) => {
     try {
-      const r = await axios.get(`${DJANGO_PRESIGN_ENDPOINT}/${productId}/presigned-urls`);
-      const data = r.data || {};
+      const r = await fetch(`${import.meta.env.VITE_DJANGO_URL}/${productId}/presigned-urls`);
+      const data = await r.json();
       return {
         product_image1_url: data.product_image1_url ?? data.image1_url ?? data[0] ?? null,
         product_image2_url: data.product_image2_url ?? data.image2_url ?? data[1] ?? null,
@@ -72,7 +77,7 @@ export default function ProductDetail() {
 
   const fetchProductById = async (id) => {
     try {
-      const resp = await fetch(`http://localhost:8000/api/products/${id}`, { headers: { Accept: 'application/json' }});
+      const resp = await fetch(`${import.meta.env.VITE_DJANGO_URL}/products/${id}`, { headers: { Accept: 'application/json' }});
       if (!resp.ok) throw new Error(`product fetch failed status=${resp.status}`);
       return await resp.json();
     } catch (err) {
@@ -98,7 +103,7 @@ export default function ProductDetail() {
 
       // Try Spring product detail first
       try {
-        const resp = await fetch(`http://localhost:4040/api/products/${id}`);
+        const resp = await fetch(`${import.meta.env.VITE_DJANGO_URL}/products/${id}`);
         if (resp.ok) productData = await resp.json();
       } catch (e) { /* ignore */ }
 
@@ -155,7 +160,7 @@ export default function ProductDetail() {
         try {
           const query = slug.replace(/-/g, ' ');
           const params = new URLSearchParams({ name: query, page: '0', size: '1' });
-          const resp = await fetch(`http://localhost:4040/api/search-by-name?${params.toString()}`);
+          const resp = await fetch(`${import.meta.env.VITE_API_URL}/search-by-name?${params.toString()}`);
           if (resp.ok) {
             const d = await resp.json().catch(() => null);
             const items = Array.isArray(d.content) ? d.content : Array.isArray(d) ? d : (d?.content ?? []);
@@ -199,46 +204,37 @@ export default function ProductDetail() {
   const fetchReviews = async () => {
     if (!product?.id) return;
     const pId = product.id;
-    const tryUrls = [
-      `http://localhost:4040/api/reviews/product/${pId}/`,
-      `http://localhost:4040/api/reviews/product/${pId}`,
-      `http://localhost:4040/api/reviews-by-id/${pId}`,
-      `http://localhost:4040/api/reviews/product/${pId}`,
-      `http://localhost:4040/api/reviews/?product=${pId}`,
-    ];
 
-    for (const url of tryUrls) {
-      try {
-        const resp = await fetch(url, { headers: { Accept: 'application/json' }});
-        if (!resp.ok) continue;
-        const data = await resp.json().catch(() => null);
-        const parsed = parsePaginated(data);
-        const normalized = parsed.map(r => ({
-          id: r.id ?? r.pk ?? null,
-          rating: r.rating ?? r.score ?? 0,
-          comment: r.comment ?? r.text ?? '',
-          created_at: r.created_at ?? r.createdAt ?? r.timestamp ?? null,
-          user: {
-            first_name: r.user_firstname ?? (r.user?.firstname ?? r.user?.first_name) ?? null,
-            last_name: r.user_lastname ?? (r.user?.lastname ?? r.user?.last_name) ?? null,
-            userid: r.user_id ?? r.user?.userid ?? r.user?.id ?? null
+    try {
+        const url = `${import.meta.env.VITE_API_URL}/reviews-by-id/${pId}`;
+        console.log('Fetching reviews from:', url); // Debug log
+        const resp = await fetch(url, { 
+          headers: { 
+            'Accept': 'application/json'
           }
-        }));
-        setReviews(normalized);
-        return;
-      } catch (err) { continue; }
+        });
+      
+      if (!resp.ok) {
+        throw new Error(`HTTP error! status: ${resp.status}`);
+      }
+      const data = await resp.json();
+      const parsed = Array.isArray(data.results) ? data.results : [];
+      console.log('Reviews data:', parsed); // Debug log
+      setReviews(parsed);
+    } catch (err) {
+      console.error('Failed to fetch reviews:', err);
+      setReviews([]);
     }
-    setReviews([]);
   };
 
   const fetchAverageRating = async () => {
     if (!product?.id) return;
     const pId = product.id;
     const tryUrls = [
-      `http://localhost:8000/api/reviews/product/${pId}/average/`,
-      `http://localhost:8000/api/reviews/product/${pId}/average`,
-      `http://localhost:4040/api/reviews-average/${pId}`,
-      `http://localhost:4040/api/reviews/${pId}/average`,
+      `${import.meta.env.VITE_DJANGO_URL}/reviews/product/${pId}/average/`,
+      `${import.meta.env.VITE_DJANGO_URL}/reviews/product/${pId}/average`,
+      `${import.meta.env.VITE_API_URL}/reviews-average/${pId}`,
+      `${import.meta.env.VITE_API_URL}/reviews/${pId}/average`,
     ];
     for (const url of tryUrls) {
       try {
@@ -270,25 +266,84 @@ export default function ProductDetail() {
     if (!newRating || !newComment.trim()) return toast({ variant: 'destructive', title: 'Invalid review', description: 'Select rating and add comment' });
     setSubmittingReview(true);
     try {
-      const token = user?.token ?? localStorage.getItem('token') ?? localStorage.getItem('auth_token');
-      const payload = { product: product.id, user_id: user?.userid ?? undefined, rating: newRating, comment: newComment.trim() };
-      const tryPostUrls = [`http://localhost:4040/api/create-review`, `http://localhost:8000/api/reviews/`, `http://localhost:8000/api/reviews`];
-      let posted = false;
-      for (const url of tryPostUrls) {
-        try {
-          const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(payload) });
-          if (!resp.ok) continue;
-          posted = true;
-          break;
-        } catch (err) { continue; }
+      const token = tokenService.getAccessToken();
+      if (!token) {
+        throw new Error('Please login to submit a review');
       }
-      if (!posted) throw new Error('Could not post review; check endpoint and auth');
-      toast({ title: 'Review submitted' });
-      setNewRating(0); setNewComment('');
-      await fetchReviews(); await fetchAverageRating();
+      
+      if (!user) {
+        throw new Error('Please login to submit a review');
+      }
+
+      // Check for either user_id or user_email
+      if (!user?.userid && !user?.id && !user?.emailid && !user?.email) {
+        throw new Error('User ID or email is required to submit a review');
+      }
+      
+      // Log user data to debug
+      console.log('Current user data:', user);
+      
+      const payload = { 
+        product: product.id,
+        user_id: user?.userid || user?.id,
+        user_email: user?.emailid || user?.email,
+        rating: newRating, 
+        comment: newComment.trim()
+      };
+
+      const url = `${import.meta.env.VITE_API_URL}/create-review`;
+      const resp = await fetch(url, { 
+        method: 'POST', 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`
+        }, 
+        body: JSON.stringify(payload) 
+      });
+
+      if (!resp.ok) {
+        const errorData = await resp.json().catch(() => null);
+        console.log('Review submission failed:', {
+          status: resp.status,
+          errorData,
+          payload,
+          userInfo: {
+            hasUserid: Boolean(user?.userid || user?.id),
+            hasEmail: Boolean(user?.emailid || user?.email)
+          }
+        });
+
+        if (errorData?.detail === "user_id or user_email is required") {
+          throw new Error('User information is missing. Please log out and log in again.');
+        }
+
+        if (resp.status === 403) {
+          throw new Error('You can only review products after successful purchase');
+        }
+        if (resp.status === 400) {
+          throw new Error(errorData?.detail || 'Invalid review data');
+        }
+        throw new Error(errorData?.detail || 'Failed to submit review');
+      }
+
+      await resp.json();
+      toast({ title: 'Review submitted successfully' });
+      setNewRating(0);
+      setNewComment('');
+      await fetchReviews();
+      await fetchAverageRating();
     } catch (err) {
       console.error('submit review error', err);
-      toast({ variant: 'destructive', title: 'Failed to submit review', description: String(err.message) });
+      toast({ 
+        variant: 'destructive', 
+        title: 'Failed to submit review', 
+        description: err.message === 'Please login to submit a review' 
+          ? 'You need to be logged in to submit a review'
+          : err.message === 'User information is missing'
+          ? 'Please log out and log in again'
+          : err.message
+      });
     } finally {
       setSubmittingReview(false);
     }
@@ -305,18 +360,66 @@ export default function ProductDetail() {
   };
 
   const handleAddToCart = async () => {
-    if (!selectedVariant) return toast({ variant: 'destructive', title: 'Please select weight' });
+    if (!user) {
+      toast({
+        title: "Please login",
+        description: "You need to be logged in to add items to cart",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (!selectedVariant) {
+      toast({
+        title: "Select a size",
+        description: "Please select a size before adding to cart",
+        variant: "destructive"
+      });
+      return;
+    }
+
     const currentStock = getCurrentStock();
-    if (currentStock <= 0) return toast({ variant: 'destructive', title: 'Out of stock' });
+    if (currentStock <= 0) {
+      toast({ variant: 'destructive', title: 'Out of stock' });
+      return;
+    }
+
     setAddingToCart(true);
     try {
-      const cartItem = { id: product.id, name: product.product_name, price: selectedVariant.price, product_image1_url: product.product_image1_url || '/placeholder.png', weight: selectedVariant.weight, quantity: 1 };
+      const cartItem = {
+        id: product.id,
+        name: product.product_name,
+        price: Number(selectedVariant.price),
+        product_image1_url: product.product_image1_url || '/placeholder.png',
+        weight: Number(selectedVariant.weight),
+        quantity: 1
+      };
+
       await addItem(cartItem);
-      toast({ title: 'Added to cart' });
-    } catch (err) {
-      console.error('add to cart error', err);
-      toast({ variant: 'destructive', title: 'Failed to add to cart' });
-    } finally { setAddingToCart(false); }
+
+      // Fetch updated cart count from backend
+      try {
+        const response = await axios.get('/cart-count');
+        const count = response?.data ?? 0;
+        window.dispatchEvent(new CustomEvent('cart-count-updated', { detail: count }));
+      } catch (error) {
+        console.error('Failed to fetch cart count:', error);
+      }
+
+      toast({
+        title: "Added to cart",
+        description: `${product.product_name} (${selectedVariant.weight}g) added to cart`,
+      });
+    } catch (error) {
+      console.error('Add to cart failed:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add item to cart. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setAddingToCart(false);
+    }
   };
 
   // image rotation
@@ -415,8 +518,26 @@ export default function ProductDetail() {
           <p className="text-gray-600 mb-4">{product.product_description}</p>
 
           <div className="flex items-center gap-2 mb-6">
-            <div className="flex text-yellow-500">{[...Array(5)].map((_, i) => (<svg key={i} className="w-5 h-5" fill={i < Math.round(averageRating) ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>))}</div>
-            <span className="text-gray-500 text-sm">({averageRating.toFixed(1)} / 5) - {ratingCount} reviews</span>
+              <div className="flex text-yellow-500">
+                {[...Array(5)].map((_, i) => {
+                  const full = i + 1 <= Math.floor(averageRating);
+                  const partial = !full && i < averageRating;
+                  const percent = partial ? Math.round((averageRating - i) * 100) : 0;
+                  return (
+                    <span key={i} className="relative w-5 h-5 inline-block">
+                      <svg className="absolute top-0 left-0 w-5 h-5" fill={full ? "#eab308" : "#d1d5db"} stroke="#eab308" viewBox="0 0 20 20">
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                      </svg>
+                      {partial && (
+                        <svg className="absolute top-0 left-0 w-5 h-5" style={{ clipPath: `inset(0 ${100 - percent}% 0 0)` }} fill="#eab308" stroke="#eab308" viewBox="0 0 20 20">
+                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                        </svg>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            <span className="text-gray-600 text-md font-bold"> {ratingCount} Reviews</span>
           </div>
 
           <div className="flex flex-col gap-2 mb-4">
@@ -468,30 +589,255 @@ export default function ProductDetail() {
         </div>
       </div>
 
-      {/* Reviews */}
-      <div className="mt-12">
-        <h2 className="text-2xl font-bold mb-4">Customer Reviews</h2>
-        {reviews.length === 0 ? <p className="text-gray-600">No reviews yet. Be the first to review this product!</p> : reviews.map(review => (
-          <div key={review.id} className="border-b py-4">
-            <div className="flex justify-between mb-2">
-              <span className="font-medium">{`${review.user?.first_name ?? ''} ${review.user?.last_name ?? ''}`.trim() || 'Anonymous'}</span>
-              <span className="text-sm text-gray-500">{review.created_at ? new Date(review.created_at).toLocaleDateString() : ''}</span>
+      {/* Reviews Section */}
+      <div className="mt-16 bg-white rounded-2xl shadow-sm border p-8">
+        {/* Reviews Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Customer Reviews</h2>
+            <p className="text-gray-500 mt-1">{ratingCount} reviews</p>
+          </div>
+          {user && (
+            <div className="relative group">
+              <button
+                className="bg-yellow-400 hover:bg-yellow-500 rounded-full p-2 flex items-center justify-center shadow"
+                title="Write review"
+                aria-label="Write review"
+                onClick={() => {
+                  setShowReviewForm((v) => !v);
+                  setTimeout(() => {
+                    const el = document.getElementById('write-review');
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }, 100);
+                }}
+              >
+                <Pencil className="w-5 h-5 text-white" />
+              </button>
+              <span className="absolute left-1/2 -translate-x-1/2 mt-2 px-2 py-1 text-xs rounded bg-black text-white opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap z-10">
+                Write review
+              </span>
             </div>
-            <div className="flex mb-2">{[...Array(5)].map((_, i) => (<svg key={i} className="w-4 h-4 text-yellow-500" fill={i < (review.rating ?? 0) ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>))}</div>
-            <p className="text-gray-700">{review.comment}</p>
-          </div>
-        ))}
+          )}
+        </div>
 
-        {user ? (
-          <div className="mt-8">
-            <h3 className="text-xl font-bold mb-4">Write a Review</h3>
-            <div className="flex mb-4">{[1,2,3,4,5].map(r => (<button key={r} onClick={() => setNewRating(r)} className="mr-1" type="button"><svg className="w-6 h-6" fill={r <= newRating ? "#eab308" : "#d1d5db"} viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg></button>))}</div>
-            <textarea value={newComment} onChange={(e) => setNewComment(e.target.value)} className="w-full p-2 border rounded-md mb-4" rows="4" placeholder="Share your thoughts..." />
-            <Button onClick={handleSubmitReview} disabled={submittingReview}>{submittingReview ? 'Submitting...' : 'Submit Review'}</Button>
+        {/* Rating Summary */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+          {/* Average Rating Display */}
+          <div className="flex items-center gap-4">
+            <div className="text-5xl font-bold text-gray-900">{averageRating.toFixed(1)}</div>
+            <div>
+              <div className="flex text-yellow-500 mb-1">
+                {[...Array(5)].map((_, i) => (
+                  <svg key={i} className="w-5 h-5" fill={i < Math.round(averageRating) ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 20 20">
+                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                  </svg>
+                ))}
+              </div>
+              <p className="text-sm text-gray-500">Based on {ratingCount} reviews</p>
+            </div>
           </div>
-        ) : <p className="mt-4 text-gray-600">Please log in to write a review.</p>}
+        </div>
+
+        {/* Reviews List */}
+        {/* Reviews List with pagination */}
+        <div className="space-y-6 relative">
+          {reviews.length === 0 ? (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+              className="text-center py-12 bg-gray-50 rounded-lg"
+            >
+              <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
+              </svg>
+              <h3 className="mt-2 text-sm font-medium text-gray-900">No reviews yet</h3>
+              <p className="mt-1 text-sm text-gray-500">Be the first to review this product!</p>
+            </motion.div>
+          ) : (
+            <div className="grid gap-6 relative">
+              <AnimatePresence>
+                {reviews.slice(0, showAllReviews ? reviews.length : 3).map((review, index) => (
+                  <motion.div
+                    key={review.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    transition={{ duration: 0.3, delay: index * 0.1 }}
+                    className="bg-white rounded-lg p-4 shadow-sm hover:shadow-md transition-all duration-300 border border-gray-100"
+                  >
+                    <div className="flex gap-3">
+                      <div className="flex-shrink-0">
+                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                          <span className="text-primary text-sm font-medium">
+                            {(review.user_firstname?.[0] || 'A').toUpperCase()}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-medium text-gray-900">
+                              {review.user_firstname || 'Anonymous'}
+                            </span>
+                            <div className="flex items-center gap-2 mt-1">
+                              <div className="flex text-yellow-400">
+                                {[...Array(5)].map((_, i) => (
+                                  <svg 
+                                    key={i} 
+                                    className="w-4 h-4" 
+                                    fill={i < (review.rating ?? 0) ? "currentColor" : "none"} 
+                                    stroke="currentColor" 
+                                    viewBox="0 0 20 20"
+                                  >
+                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                  </svg>
+                                ))}
+                              </div>
+                              <span className="text-sm text-gray-500">
+                                {review.rating}/5
+                              </span>
+                            </div>
+                          </div>
+                          <time className="text-xs text-gray-500 flex-shrink-0">
+                            {review.created_at ? new Date(review.created_at).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric'
+                            }) : ''}
+                          </time>
+                        </div>
+                        <div className="mt-1 text-sm text-gray-600">
+                          <p className="whitespace-pre-line line-clamp-3 hover:line-clamp-none transition-all duration-200">{review.comment}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+              {reviews.length > 3 && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.3 }}
+                  className="flex justify-center mt-4"
+                >
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowAllReviews(!showAllReviews)}
+                    className="group"
+                  >
+                    {showAllReviews ? (
+                      <span className="flex items-center gap-2">
+                        Show Less
+                        <motion.svg 
+                          xmlns="http://www.w3.org/2000/svg" 
+                          className="h-4 w-4" 
+                          fill="none" 
+                          viewBox="0 0 24 24" 
+                          stroke="currentColor"
+                          animate={{ rotate: showAllReviews ? 180 : 0 }}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </motion.svg>
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        Show All {reviews.length} Reviews
+                        <motion.svg 
+                          xmlns="http://www.w3.org/2000/svg" 
+                          className="h-4 w-4" 
+                          fill="none" 
+                          viewBox="0 0 24 24" 
+                          stroke="currentColor"
+                          animate={{ rotate: showAllReviews ? 180 : 0 }}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </motion.svg>
+                      </span>
+                    )}
+                  </Button>
+                </motion.div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Write Review Section - hidden until pen icon is clicked */}
+        {user && showReviewForm && (
+          <div id="write-review" className="mt-12 bg-gray-50 rounded-lg p-6">
+            <h3 className="text-xl font-bold text-gray-900 mb-6">Write a Review</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Rating</label>
+                <div className="flex gap-1">
+                  {[1,2,3,4,5].map(r => (
+                    <button
+                      key={r}
+                      onClick={() => setNewRating(r)}
+                      className="p-1 hover:scale-110 transition"
+                      type="button"
+                    >
+                      <svg 
+                        className="w-8 h-8" 
+                        fill={r <= newRating ? "#eab308" : "#d1d5db"}
+                        viewBox="0 0 20 20"
+                      >
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                      </svg>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <div>
+                <label htmlFor="review-text" className="block text-sm font-medium text-gray-700 mb-2">
+                  Your Review
+                </label>
+                <textarea
+                  id="review-text"
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition"
+                  rows="4"
+                  placeholder="Share your experience with this product..."
+                />
+              </div>
+
+              <Button
+                onClick={handleSubmitReview}
+                disabled={submittingReview}
+                className="w-full md:w-auto bg-primary hover:bg-primary/90 text-white"
+              >
+                {submittingReview ? (
+                  <div className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Submitting...
+                  </div>
+                ) : 'Submit Review'}
+              </Button>
+            </div>
+          </div>
+        )}
+        {/* If not logged in, show login prompt */}
+        {!user && (
+          <div className="mt-8 bg-gray-50 rounded-lg p-6 text-center">
+            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+            </svg>
+            <h3 className="mt-2 text-sm font-medium text-gray-900">Login Required</h3>
+            <p className="mt-1 text-sm text-gray-500">Please log in to write a review</p>
+            <div className="mt-6">
+              <Button variant="outline" onClick={() => navigate('/login')}>
+                Log In
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+      </div>
     </div>
   );
 }

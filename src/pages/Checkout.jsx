@@ -598,7 +598,7 @@ export default function Checkout() {
   return (
     <div className="min-h-screen bg-gradient-warm">
       <Navbar />
-      <div className="pt-24 pb-16 px-4">
+      <div className="pt-12 pb-16 px-4">
         <div className="container mx-auto">
           <motion.div
             initial={{ opacity: 0, y: 30 }}

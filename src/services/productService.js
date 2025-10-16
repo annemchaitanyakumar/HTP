@@ -14,7 +14,7 @@ class ProductService {
 
       // IMPORTANT: do NOT set Cache-Control / Pragma / Expires here
       // those custom headers cause CORS preflight failures unless server allows them.
-      const response = await axios.get('http://localhost:4040/api/get-all-products', {
+      const response = await axios.get(`${import.meta.env.VITE_API_URL}/get-all-products`, {
         params
       });
 

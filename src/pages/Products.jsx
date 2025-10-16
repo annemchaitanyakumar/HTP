@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/popover';
 import { SearchBar } from '@/components/SearchBar';
 
-const DJANGO_PRESIGN_ENDPOINT = 'http://localhost:8000/api/products'; // /{id}/presigned-urls
+const DJANGO_PRESIGN_ENDPOINT = `${import.meta.env.VITE_BACKEND_URL}/products`; // /{id}/presigned-urls
 
 const slugify = (name = '') =>
   name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -173,14 +173,14 @@ export default function Products() {
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      let url = 'http://localhost:4040/api/get-all-products';
+      let url = `${import.meta.env.VITE_API_URL}/get-all-products`;
       let params = { page: currentPage, size: PAGE_SIZE }; // 1-based for get-all-products
 
       if (filter === 'price' && appliedPriceRange) {
-        url = 'http://localhost:4040/api/filter-by-price';
+        url = `${import.meta.env.VITE_API_URL}/filter-by-price`;
         params = { minPrice: appliedPriceRange.min, maxPrice: appliedPriceRange.max, page: currentPage - 1, size: PAGE_SIZE };
       } else if (filter !== 'all') {
-        url = 'http://localhost:4040/api/by-category';
+        url = `${import.meta.env.VITE_API_URL}/by-category`;
         params = { category: filter, page: currentPage - 1, size: PAGE_SIZE };
       }
 

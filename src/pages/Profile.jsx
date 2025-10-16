@@ -138,7 +138,7 @@ const Profile = () => {
     email: '',
     mobileNumber: ''
   });
-  const [isOpen, setIsOpen] = useState(false); // Moved inside the component
+  const [openOrders, setOpenOrders] = useState({}); // Track open state for each order
   const [currentPage, setCurrentPage] = useState(1);
   const [timeFilter, setTimeFilter] = useState('all');
   const [yearFilter, setYearFilter] = useState('all');
@@ -1143,7 +1143,7 @@ const Profile = () => {
                         <>
                           <div className="space-y-3">
                             {getPaginatedOrders(orders).orders.map((order) => (
-                              <Card key={order.orderid} className="overflow-hidden hover:shadow-md transition-shadow">
+                              <Card key={`order-${order.orderid}`} className="overflow-hidden hover:shadow-md transition-shadow">
                                 <CardContent className="p-3">
                                   {/* Order Header */}
                                   <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pb-2 border-b">
@@ -1199,7 +1199,10 @@ const Profile = () => {
                                   {/* Mobile Accordion for Products */}
                                   {order.items && order.items.length > 0 && (
                                     <div className="mt-2 md:hidden">
-                                      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+                                      <Collapsible 
+                                        open={openOrders[order.orderid]} 
+                                        onOpenChange={(open) => setOpenOrders(prev => ({...prev, [order.orderid]: open}))}
+                                      >
                                         <CollapsibleTrigger asChild>
                                           <Button variant="ghost" className="w-full justify-between h-8 px-2">
                                             <span className="text-sm font-medium">
@@ -1208,7 +1211,7 @@ const Profile = () => {
                                             <ChevronDown 
                                               className={cn(
                                                 "h-5 w-5 text-gray-500 transition-transform duration-200",
-                                                isOpen && "rotate-180"
+                                                openOrders[order.orderid] && "rotate-180"
                                               )}
                                             />
                                           </Button>
