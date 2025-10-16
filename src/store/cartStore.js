@@ -1,74 +1,150 @@
+// src/store/cartStore.js
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { cartService } from '@/services/cartService';
 import { toast } from '@/hooks/use-toast';
-import axios from '@/lib/axios';
+import axiosDefault from 'axios'; // fresh axios instance (bypass app's global axios)
+import axios from '@/lib/axios'; // keep for other authenticated calls if needed
 
 /**
- * @typedef {Object} CartItem
- * @property {number} cartId
- * @property {number} productId
- * @property {string} productName
- * @property {string} productDescription
- * @property {number} productPrice
- * @property {string} category
- * @property {number} productStockQuantity
- * @property {string} productWeight
- * @property {number} quantity
- * @property {string} addedAt
- * @property {string} productImage1
- * @property {string} productImage2
- * @property {string} productImage3
- * @property {number} [weightBasedPrice]
- * @property {string} [image] // Add image property for rendering
+ * CartItem shape (frontend):
+ * { cartId, productId, productName, productTitle, productDescription,
+ *   productPrice, category, productStockQuantity, stockByWeight,
+ *   productWeight, quantity, addedAt, productImage1, productImage2, productImage3,
+ *   weightBasedPrice, image, slug,
+ *   isContainer (boolean),
+ *   packagingType ('container'|'general'),
+ *   containerFee (number)
+ * }
  */
 
-export const useCartStore = create()(
+const DEFAULT_CONTAINER_FEE = 30;
+
+const useCartStore = create()(
   persist(
     (set, get) => ({
       items: [],
+      userId: null, // Add userId to track current user
       loading: false,
       error: null,
+      taxInfo: {
+        gstPercentage: 5, // default value until API responds
+        containerCharges: 30,
+        shippingCharges: 50
+      },
 
-      // Helper function to fetch presigned URLs
+      // fetch presigned URLs for images using a plain axios instance (no credentials)
       fetchPresignedUrls: async (productId) => {
-        const presignedUrlsUrl = `http://localhost:8000/api/products/${productId}/presigned-urls`;
+        const presignedUrlsUrl = `http://localhost:8000/api/products/${productId}/presigned-urls/`;
         try {
-          const response = await axios.create().get(presignedUrlsUrl);
-          const data = response.data;
-          console.log(`Presigned URLs for product ${productId}:`, data);
-          
-          const imageUrl = data?.image1_url || data?.product_image1_url || data?.[0] || '/placeholder.png';
-          return imageUrl;
+          const plain = axiosDefault.create();
+          const response = await plain.get(presignedUrlsUrl, { withCredentials: false, timeout: 8000 });
+          const data = response?.data ?? {};
+
+          const normalized = {
+            product_image1_url: data?.product_image1_url || data?.image1_url || (Array.isArray(data) ? data[0] : undefined) || '/placeholder.png',
+            product_image2_url: data?.product_image2_url || data?.image2_url || (Array.isArray(data) ? data[1] : undefined) || '/placeholder.png',
+            product_image3_url: data?.product_image3_url || data?.image3_url || (Array.isArray(data) ? data[2] : undefined) || '/placeholder.png',
+            product_image4_url: data?.product_image4_url || data?.image4_url || (Array.isArray(data) ? data[3] : undefined) || '/placeholder.png',
+            product_image5_url: data?.product_image5_url || data?.image5_url || (Array.isArray(data) ? data[4] : undefined) || '/placeholder.png',
+          };
+
+          const firstUrl = [normalized.product_image1_url, normalized.product_image2_url, normalized.product_image3_url, normalized.product_image4_url, normalized.product_image5_url]
+            .find(u => u && u !== '/placeholder.png');
+
+          return { normalized, firstUrl };
         } catch (error) {
-          console.error('Error fetching presigned URLs:', error);
-          return '/placeholder.png';
+          console.error('Error fetching presigned URLs (cartStore):', error);
+          return {
+            normalized: {
+              product_image1_url: '/placeholder.png',
+              product_image2_url: '/placeholder.png',
+              product_image3_url: '/placeholder.png',
+              product_image4_url: '/placeholder.png',
+              product_image5_url: '/placeholder.png',
+            },
+            firstUrl: '/placeholder.png'
+          };
         }
+      },
+
+      // Compute total price for item (excluding container fee unless included)
+      getItemTotalPrice: (item) => {
+        const unitPrice = Number(item.weightBasedPrice ?? item.productPrice) || 0;
+        const qty = Number(item.quantity || 0);
+        return unitPrice * qty; // Base price * quantity, exclude containerFee
+      },
+
+      calculateItemTotal: (item) => {
+        const unitPrice = item.productPrice || item.price;
+        return unitPrice * item.quantity;
+      },
+
+      getTotalWithPackaging: () => {
+        const state = get();
+        return state.items.reduce((total, item) => total + state.getItemTotalPrice(item), 0);
+      },
+
+      calculateSubtotal: () => {
+        const { items } = get();
+        return items.reduce((total, item) => {
+          // Use totalPrice directly as it's already calculated with quantity
+          const price = Number(item.totalPrice ?? item.weightBasedPrice ?? item.productPrice ?? item.price) || 0;
+          return total + price; // Don't multiply by quantity as totalPrice includes it
+        }, 0);
+      },
+
+      getTotal: () => {
+        const state = get();
+        const subtotal = state.calculateSubtotal();
+        const containerTotal = state.items.reduce((total, item) => {
+          if (item.isContainer) {
+            const containerFee = Number(item.containerFee ?? state.taxInfo.containerCharges) || 0;
+            return total + (containerFee * item.quantity);
+          }
+          return total;
+        }, 0);
+        
+        const gstAmount = (subtotal * state.taxInfo.gstPercentage) / 100;
+        return subtotal + containerTotal + gstAmount + state.taxInfo.shippingCharges;
+      },
+  
+      isCheckoutAllowed: () => {
+        const state = get();
+        return state.items.length > 0 && state.items.every(item => typeof item.isContainer === 'boolean');
       },
 
       loadCartItems: async () => {
         set({ loading: true, error: null });
         try {
-          console.log('Fetching cart items from service...');
           const cartItems = await cartService.getCartItems();
-          console.log('Received cart items:', cartItems);
 
-          // Fetch presigned URLs for each item
           const itemsWithImages = await Promise.all(
-            cartItems.map(async (item) => {
-              const imageUrl = await get().fetchPresignedUrls(item.productId);
-              return { ...item, image: imageUrl };
+            (cartItems || []).map(async (item) => {
+              const { firstUrl } = await get().fetchPresignedUrls(item.productId).catch(() => ({ firstUrl: '/placeholder.png' }));
+              const basePrice = parseFloat(item.productPrice) || 0; // Ensure base price is per unit
+              const containerFee = item.isContainer ? (Number(item.containerFee ?? DEFAULT_CONTAINER_FEE) || 0) : 0;
+
+              return {
+                ...item,
+                isContainer: typeof item.isContainer === 'boolean' ? item.isContainer : false,
+                packagingType: item.isContainer ? 'container' : (item.packagingType || 'general'),
+                weightBasedPrice: basePrice, // Set to base unit price
+                image: firstUrl || '/placeholder.png',
+                slug: item.slug || undefined,
+                containerFee,
+              };
             })
           );
 
           set({ items: itemsWithImages, loading: false });
         } catch (error) {
           console.error('Error loading cart items:', error);
-          set({ error: error.message, loading: false });
+          set({ error: error?.message || String(error), loading: false });
           toast({
             variant: 'destructive',
             title: 'Error',
-            description: error.message || 'Failed to load cart items',
+            description: error?.message || 'Failed to load cart items',
           });
         }
       },
@@ -76,9 +152,8 @@ export const useCartStore = create()(
       addItem: async (product, quantity = 1) => {
         set({ loading: true, error: null });
         try {
-          // Check if item with same weight already exists in cart
           const existingItem = get().items.find(
-            (item) => item.productId === product.id && item.productWeight === product.weight
+            (item) => item.productId === product.id && item.productWeight === (product.selectedWeight || product.weight)
           );
 
           if (existingItem) {
@@ -92,78 +167,41 @@ export const useCartStore = create()(
             );
           }
 
-          if (!product.id) {
-            throw new Error('Product ID is required');
-          }
+          if (!product.id) throw new Error('Product ID is required');
 
-          // Get price and weight from the product's price_by_weight if available
-          let price = product.price;
-          let weight = product.weight;
-          
-          if (product.price_by_weight) {
-            if (typeof product.price_by_weight === 'string') {
-              try {
-                const priceByWeight = JSON.parse(product.price_by_weight);
-                const weights = Object.keys(priceByWeight).sort((a, b) => Number(a) - Number(b));
-                if (weights.length > 0) {
-                  weight = weights[0];
-                  price = priceByWeight[weight];
-                }
-              } catch (e) {
-                console.error('Error parsing price_by_weight:', e);
-              }
-            } else {
-              const weights = Object.keys(product.price_by_weight).sort((a, b) => Number(a) - Number(b));
-              if (weights.length > 0) {
-                weight = weights[0];
-                price = product.price_by_weight[weight];
-              }
-            }
-          }
+          let price = product.selectedPrice || product.price || product.product_price;
+          let weight = product.selectedWeight || product.weight || null;
 
-          console.log('CartStore: Adding item with details:', {
-            productId: product.id,
-            productName: product.product_name,
-            quantity,
-            price,
-            weight,
-            slug: product.slug,
-          });
+          if (!price || !weight) throw new Error('Please select a weight option first');
 
-          // Fetch cart item first
-          const cartItem = await cartService.addToCart(
-            product.id,
-            quantity,
-            weight,
-            price
-          );
-          
-          // Add the slug to the cart item
-          cartItem.slug = product.slug;
+          const cartItem = await cartService.addToCart(product.id, quantity, weight, price);
 
-          // Fetch presigned URL for the new item
-          const imageUrl = await get().fetchPresignedUrls(product.id);
+          const { firstUrl } = await get().fetchPresignedUrls(product.id).catch(() => ({ firstUrl: '/placeholder.png' }));
+          const containerFee = cartItem.isContainer ? (Number(cartItem.containerFee ?? DEFAULT_CONTAINER_FEE) || 0) : 0;
 
-          const cartItemWithCorrectPrice = {
+          const cartItemWithClientFields = {
             ...cartItem,
-            weightBasedPrice: parseFloat(product.price),
-            image: imageUrl // Add image property
+            weightBasedPrice: parseFloat(price), // Ensure base price is per unit
+            image: firstUrl || '/placeholder.png',
+            slug: product.slug,
+            isContainer: typeof cartItem.isContainer === 'boolean' ? cartItem.isContainer : false,
+            packagingType: cartItem.isContainer ? 'container' : (cartItem.packagingType || 'general'),
+            containerFee,
           };
 
           set((state) => ({
-            items: [cartItemWithCorrectPrice, ...state.items],
+            items: [cartItemWithClientFields, ...state.items],
             loading: false,
           }));
-          toast({
-            title: 'Success',
-            description: 'Item added to cart',
-          });
+
+          toast({ title: 'Success', description: 'Item added to cart' });
         } catch (error) {
-          set({ error: error.message, loading: false });
+          console.error('addItem error', error);
+          set({ error: error?.message || String(error), loading: false });
           toast({
             variant: 'destructive',
             title: 'Error',
-            description: error.message || 'Failed to add item to cart',
+            description: error?.message || 'Failed to add item to cart',
           });
         }
       },
@@ -171,105 +209,270 @@ export const useCartStore = create()(
       removeItem: async (cartId) => {
         set({ loading: true, error: null });
         try {
-          console.log('Removing item with cartId:', cartId);
           await cartService.removeFromCart(cartId);
           set((state) => ({
             items: state.items.filter((item) => item.cartId !== cartId),
             loading: false,
           }));
-          toast({
-            title: 'Success',
-            description: 'Item removed from cart',
-          });
+          toast({ title: 'Success', description: 'Item removed from cart' });
         } catch (error) {
           console.error('Error removing item:', error);
-          set({ error: error.message, loading: false });
-          toast({
-            variant: 'destructive',
-            title: 'Error',
-            description: error.message || 'Failed to remove item from cart',
-          });
+          set({ error: error?.message || String(error), loading: false });
+          toast({ variant: 'destructive', title: 'Error', description: error?.message || 'Failed to remove item' });
         }
       },
 
       updateQuantity: async (cartId, newQuantity, weight) => {
         set({ loading: true, error: null });
         try {
+
+
+
           const updatedItem = await cartService.updateCartItem(cartId, newQuantity, weight);
-          // Ensure the updated item retains the image URL
-          const existingItem = get().items.find((item) => item.cartId === cartId);
-          set((state) => ({
-            items: state.items.map((item) =>
-              item.cartId === cartId ? { ...updatedItem, image: existingItem.image } : item
-            ),
-            loading: false,
-          }));
-          toast({
-            title: 'Success',
-            description: 'Cart updated successfully',
-          });
+          console.log("🧾 Backend Response:", updatedItem);
+const existing = get().items.find(i => i.cartId === cartId);
+const containerFee = updatedItem.isContainer
+  ? (Number(updatedItem.containerFee ?? existing?.containerFee ?? DEFAULT_CONTAINER_FEE) || 0)
+  : 0;
+
+// ✅ Ensure we keep per-unit price, not total
+const unitPrice = parseFloat(updatedItem.productPrice || existing?.productPrice || 0);
+
+set((state) => ({
+  items: state.items.map((item) =>
+    item.cartId === cartId
+      ? {
+          ...item,
+          ...updatedItem,
+          productPrice: unitPrice,
+          weightBasedPrice: unitPrice,
+          quantity: newQuantity,
+          image: existing?.image,
+          slug: existing?.slug,
+          packagingType: updatedItem.isContainer ? 'container' : (updatedItem.packagingType || 'general'),
+          isContainer: Boolean(updatedItem.isContainer),
+          containerFee
+        }
+      : item
+  ),
+  loading: false,
+}));
+
+          toast({ title: 'Success', description: 'Cart updated successfully' });
         } catch (error) {
-          set({ error: error.message, loading: false });
-          toast({
-            variant: 'destructive',
-            title: 'Error',
-            description: error.message || 'Failed to update cart',
-          });
+          console.error('updateQuantity error', error);
+          set({ error: error?.message || String(error), loading: false });
+          toast({ variant: 'destructive', title: 'Error', description: error?.message || 'Failed to update cart' });
+        }
+      },
+
+      // Fetch current cart count from backend
+      fetchCartCount: async () => {
+        try {
+          const response = await axios.get('/cart-count');
+          const count = response?.data ?? 0;
+          return count;
+        } catch (error) {
+          console.error('Error fetching cart count:', error);
+          return null;
         }
       },
 
       incrementQuantity: async (cartId) => {
-        const item = get().items.find((item) => item.cartId === cartId);
+        const item = get().items.find((i) => i.cartId === cartId);
         if (item && item.quantity < 10) {
           await get().updateQuantity(cartId, item.quantity + 1, item.productWeight);
+          // Fetch updated count after increment
+          const count = await get().fetchCartCount();
+          if (count !== null) {
+            window.dispatchEvent(new CustomEvent('cart-count-updated', { detail: count }));
+          }
         }
       },
 
       decrementQuantity: async (cartId) => {
-        const item = get().items.find((item) => item.cartId === cartId);
+        const item = get().items.find((i) => i.cartId === cartId);
         if (item && item.quantity > 1) {
           await get().updateQuantity(cartId, item.quantity - 1, item.productWeight);
+          // Fetch updated count after decrement
+          const count = await get().fetchCartCount();
+          if (count !== null) {
+            window.dispatchEvent(new CustomEvent('cart-count-updated', { detail: count }));
+          }
         } else if (item && item.quantity === 1) {
           await get().removeItem(cartId);
+          // Fetch updated count after remove
+          const count = await get().fetchCartCount();
+          if (count !== null) {
+            window.dispatchEvent(new CustomEvent('cart-count-updated', { detail: count }));
+          }
+        }
+      },
+
+      updatePackaging: async (cartId, packagingType) => {
+        const isContainer = packagingType === 'container' || packagingType === true;
+        const prevItems = get().items;
+        set(state => ({
+          items: state.items.map(item =>
+            item.cartId === cartId ? { ...item, packagingType: isContainer ? 'container' : 'general', isContainer, containerFee: isContainer ? (item.containerFee ?? DEFAULT_CONTAINER_FEE) : 0 } : item
+          )
+        }));
+
+        try {
+          const updated = await cartService.updatePackaging(cartId, isContainer);
+          const containerFee = updated.isContainer ? (Number(updated.containerFee ?? DEFAULT_CONTAINER_FEE) || 0) : 0;
+
+          set(state => ({
+            items: state.items.map(item =>
+              item.cartId === cartId
+                ? {
+                    ...item,
+                    productId: updated.productId ?? item.productId,
+                    productPrice: updated.productPrice ?? item.productPrice,
+                    quantity: updated.quantity ?? item.quantity,
+                    productWeight: updated.productWeight ?? item.productWeight,
+                    isContainer: Boolean(updated.isContainer),
+                    packagingType: updated.isContainer ? 'container' : 'general',
+                    containerFee
+                  }
+                : item
+            )
+          }));
+
+          toast({ title: 'Packaging updated', description: `Saved ${isContainer ? 'container' : 'general'} packaging.` });
+        } catch (err) {
+          set({ items: prevItems });
+          console.error('Failed to persist packaging change', err);
+          toast({ variant: 'destructive', title: 'Save failed', description: 'Could not save packaging. Please try again.' });
+          throw err;
         }
       },
 
       clearCart: async () => {
         set({ loading: true, error: null });
         try {
-          await cartService.clearCart();
+          const currentItems = get().items;
+          await Promise.all(currentItems.map(item => cartService.removeFromCart(item.cartId)));
           set({ items: [], loading: false });
-          toast({
-            title: 'Success',
-            description: 'Cart cleared successfully',
-          });
+          toast({ title: 'Success', description: 'Cart cleared successfully' });
         } catch (error) {
           console.error('Error clearing cart:', error);
-          set({ error: error.message, loading: false });
-          toast({
-            variant: 'destructive',
-            title: 'Error',
-            description: error.message || 'Failed to clear cart',
-          });
+          set({ error: error?.message || String(error), loading: false });
+          toast({ variant: 'destructive', title: 'Error', description: error?.message || 'Failed to clear cart' });
         }
       },
 
       getTotalItems: () => {
         const state = get();
-        return state.items.reduce((total, item) => total + item.quantity, 0);
+        return state.items.reduce((total, item) => total + (Number(item.quantity) || 0), 0);
       },
 
       getTotalPrice: () => {
         const state = get();
-        return state.items.reduce(
-          (total, item) => total + (item.weightBasedPrice || item.productPrice) * item.quantity,
-          0
-        );
+        return state.items.reduce((total, item) => total + state.getItemTotalPrice(item), 0);
+      },
+
+      fetchTaxInfo: async () => {
+        try {
+          const response = await axios.get(`${import.meta.env.VITE_API_URL}/get-tax-info`);
+          set({ taxInfo: response.data });
+        } catch (error) {
+          console.error('Failed to fetch tax info:', error);
+        }
+      },
+
+      calculateGST: (subtotal) => {
+        const { taxInfo } = get();
+        if (!subtotal || !taxInfo.gstPercentage) return 0;
+        return (subtotal * taxInfo.gstPercentage) / 100;
+      },
+
+      calculateContainerFee: () => {
+        const { items, taxInfo } = get();
+        return items.reduce((total, item) => {
+          const containerFee = item.containerCharge || taxInfo.containerCharges || 30;
+          return total + (containerFee * item.quantity);
+        }, 0);
+      },
+
+      // Update initialization to include userId
+      initializeCart: async (userId) => {
+        try {
+          set({ userId, loading: true }); // Set current userId and loading state
+          if (!userId) {
+            set({ items: [], loading: false });
+            return;
+          }
+
+          const token = tokenService.getAccessToken();
+          if (!token) {
+            console.warn('No auth token found during cart initialization');
+            set({ items: [], loading: false });
+            return;
+          }
+
+          const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/all`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          // Handle different response formats
+          let cartItems = [];
+          if (response.data) {
+            if (Array.isArray(response.data)) {
+              cartItems = response.data;
+            } else if (response.data.items && Array.isArray(response.data.items)) {
+              cartItems = response.data.items;
+            } else if (response.data.data && Array.isArray(response.data.data)) {
+              cartItems = response.data.data;
+            }
+          }
+
+          set({ 
+            items: cartItems, 
+            loading: false,
+            error: null
+          });
+          
+          return cartItems; // Return items for chaining
+        } catch (error) {
+          console.error('Failed to initialize cart:', error?.response?.data || error.message);
+          set({ 
+            items: [],
+            loading: false,
+            error: error?.response?.data?.message || error.message
+          });
+        }
+      },
+
+      // Clear cart for logout
+      clearCart: () => {
+        set({ items: [], userId: null });
       },
     }),
     {
       name: 'cart-storage',
-      skipHydration: true,
+      version: 2,
+      migrate: (persistedState, version) => {
+        if (!persistedState) return persistedState;
+        const items = Array.isArray(persistedState.items)
+          ? persistedState.items.map((it) => {
+              if (!it) return it;
+              return {
+                ...it,
+                isContainer: typeof it.isContainer === 'boolean' ? it.isContainer : false,
+                containerFee: it.isContainer ? (Number(it.containerFee ?? DEFAULT_CONTAINER_FEE) || 0) : 0,
+                packagingType: it.isContainer ? (it.packagingType || 'container') : 'general',
+              };
+            })
+          : [];
+        return { ...persistedState, items };
+      },
+      skipHydration: false,
     }
   )
 );
+
+export { useCartStore };

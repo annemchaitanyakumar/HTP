@@ -30,8 +30,6 @@ Homely-Taste-Pickles is built using the following technologies:
     *   **Spring Boot**
     *   **Spring Security**
     *   **JWT (JSON Web Tokens)**
-*   **Other:**
-    *   **Lovable:** A platform for AI-assisted code editing and project management.
 
 ## Getting Started
 

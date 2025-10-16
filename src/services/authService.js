@@ -1,243 +1,274 @@
-import { tokenService } from './tokenService';
-import { cookieUtils } from '@/utils/cookieUtils';
+import { tokenService } from './tokenService'; // ✅ IMPORT tokenService
 
 const API_BASE = '/api';
-const TOKEN_COOKIE = 'auth_token';
-const USER_DATA_KEY = 'authData';
 
 class AuthService {
-  constructor() {
-    // No need to bind methods when using arrow functions
-  }
+    verifyOtp = async (verificationData) => {
+        console.log('[AuthService] Verify OTP called', verificationData);
+        const response = await fetch(`${API_BASE}/verify-otp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(verificationData)
+        });
 
-  login = async (credentials) => {
-    console.log('[AuthService] Attempting login with credentials:', credentials);
-    const response = await fetch(`${API_BASE}/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      credentials: 'include',
-      body: JSON.stringify(credentials)
-    });
-
-    if (!response.ok) {
-      const contentType = response.headers.get('content-type');
-      let errorMessage;
-      if (contentType && contentType.includes('application/json')) {
-        const error = await response.json();
-        errorMessage = error.message || 'Login failed';
-      } else {
-        errorMessage = await response.text() || 'Login failed';
-      }
-      console.error('[AuthService] Login failed:', errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    const data = await response.json();
-    console.log('[AuthService] Login successful, response:', data);
-
-    if (data.accessToken && data.userid) {
-      const token = data.accessToken.startsWith('Bearer ') 
-        ? data.accessToken 
-        : `Bearer ${data.accessToken}`;
-      
-      const userData = {
-        accessToken: token,
-        userId: data.userid.toString(),
-        role: data.role || 'CUSTOMER',
-        email: data.emailid
-      };
-
-      localStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
-      cookieUtils.setCookie(TOKEN_COOKIE, token);
-      
-      tokenService.setTokens(
-        token,
-        data.refreshToken || null,
-        userData.userId,
-        userData.role
-      );
-
-      console.log('[AuthService] Auth data stored:', userData);
-    }
-
-    return data;
-  };
-
-  register = async (userData) => {
-    console.log('[AuthService] Attempting registration with data:', userData);
-    try {
-      const response = await fetch(`${API_BASE}/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/plain, application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify(userData)
-      });
-
-      const responseText = await response.text();
-      console.log('[AuthService] Raw response text:', responseText);
-
-      let responseData;
-      try {
-        responseData = JSON.parse(responseText);
-      } catch {
-        responseData = { message: responseText };
-      }
-
-      if (!response.ok) {
-        throw new Error(responseData.message || responseData.error || 'Registration failed');
-      }
-
-      return responseData;
-    } catch (error) {
-      console.error('[AuthService] Registration error:', error);
-      throw error;
-    }
-  };
-
-  verifyOtp = async (userData) => {
-    try {
-      // Format data to match PicklesLoginDTO with all user fields
-      const verificationData = {
-        firstname: userData.firstname,
-        lastname: userData.lastname,
-        emailid: userData.emailid,
-        password: userData.password,
-        mobilenum: userData.mobilenum,
-        role: userData.role,
-        otp: userData.otp
-      };
-      console.log('[AuthService] Attempting OTP verification with data:', verificationData);
-      const response = await fetch(`${API_BASE}/verify-otp`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/plain, application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify(verificationData)
-      });
-
-      const responseText = await response.text();
-      console.log('[AuthService] Response text:', responseText);
-
-      if (!response.ok) {
-        let errorMessage = responseText;
-        try {
-          const jsonData = JSON.parse(responseText);
-          errorMessage = jsonData.message || jsonData.error || 'OTP verification failed';
-        } catch (e) {
-          // Keep the text as is if it's not JSON
+        if (!response.ok) {
+            // Try to parse error as JSON first
+            const errorText = await response.text();
+            let error;
+            try {
+                error = JSON.parse(errorText);
+                console.error('[AuthService] OTP verification failed', error);
+                throw new Error(error.message || 'OTP verification failed');
+            } catch (e) {
+                // If parsing fails, use the raw text
+                console.error('[AuthService] OTP verification failed', errorText);
+                throw new Error(errorText || 'OTP verification failed');
+            }
         }
-        throw new Error(errorMessage);
-      }
 
-      try {
-        return JSON.parse(responseText);
-      } catch (e) {
-        return { message: responseText };
-      }
-    } catch (error) {
-      console.error('[AuthService] OTP verification error:', error);
-      throw error;
-    }
-  };
+        // Try to parse response as JSON first
+        const responseText = await response.text();
+        try {
+            const data = JSON.parse(responseText);
+            console.log('[AuthService] OTP verification response:', data);
+            
+            // If verification is successful and we have token data, set it up
+            if (data.accessToken || data.token) {
+                const token = (data.accessToken || data.token).startsWith('Bearer ')
+                    ? (data.accessToken || data.token)
+                    : `Bearer ${data.accessToken || data.token}`;
 
-  refreshToken = async () => {
-    // Implementation here
-  };
+                const userData = {
+                    accessToken: token,
+                    userId: data.userid?.toString() || data.id?.toString(),
+                    role: data.role || 'CUSTOMER',
+                    email: data.emailid || data.email
+                };
 
-  forgotPassword = async (email) => {
-    try {
-      const response = await fetch(`${API_BASE}/forgotpassword`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/plain, application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify({ email: email })
-      });
+                localStorage.setItem('authData', JSON.stringify(userData));
+                localStorage.setItem('auth_token', token);
+                tokenService.setTokens(token, null, userData);
+            }
+            
+            return data;
+        } catch (e) {
+            // If parsing fails, return the text response
+            console.log('[AuthService] OTP verification response (text):', responseText);
+            return { message: responseText };
+        }
+    };
 
-      const responseText = await response.text();
-      console.log('[AuthService] Forgot password response:', responseText);
+    register = async (userData) => {
+        console.log('[AuthService] Register called', userData);
+        const response = await fetch(`${API_BASE}/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(userData)
+        });
 
-      if (!response.ok) {
-        throw new Error(responseText);
-      }
+        if (!response.ok) {
+            // Try to parse error as JSON first
+            const errorText = await response.text();
+            let error;
+            try {
+                error = JSON.parse(errorText);
+                console.error('[AuthService] Registration failed', error);
+                throw new Error(error.message || 'Registration failed');
+            } catch (e) {
+                // If parsing fails, use the raw text
+                console.error('[AuthService] Registration failed', errorText);
+                throw new Error(errorText || 'Registration failed');
+            }
+        }
 
-      return { message: responseText };
-    } catch (error) {
-      console.error('[AuthService] Forgot password error:', error);
-      throw error;
-    }
-  };
+        // Try to parse response as JSON first
+        const responseText = await response.text();
+        try {
+            const data = JSON.parse(responseText);
+            console.log('[AuthService] Registration response:', data);
+            return data;
+        } catch (e) {
+            // If parsing fails, return the text response
+            console.log('[AuthService] Registration response (text):', responseText);
+            return { message: responseText };
+        }
+    };
 
-  validateResetOtp = async (email, otp) => {
-    // Implementation here
-  };
+    login = async (credentials) => {
+        console.log('[AuthService] Login called', credentials);
 
-  resetPassword = async (email, newPassword) => {
-    // Implementation here
-  };
+        const response = await fetch(`${API_BASE}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(credentials)
+        });
 
-  logout = () => {
-    console.log('[AuthService] Logging out');
-    localStorage.removeItem(USER_DATA_KEY);
-    cookieUtils.removeCookie(TOKEN_COOKIE);
-    tokenService.clearTokens();
-  };
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ message: 'Login failed' }));
+            console.error('[AuthService] Login failed', error);
+            throw new Error(error.message);
+        }
 
-  restoreSession = async () => {
-    try {
-      console.log('[AuthService] Attempting to restore session');
-      
-      const cookieToken = cookieUtils.getCookie(TOKEN_COOKIE);
-      const storedData = localStorage.getItem(USER_DATA_KEY);
-      
-      if (!cookieToken && !storedData) {
-        console.log('[AuthService] No stored session found');
-        return false;
-      }
+        const data = await response.json();
+        console.log('[AuthService] Login response:', data);
 
-      let userData;
-      if (storedData) {
-        userData = JSON.parse(storedData);
-      }
+        if (data.accessToken && data.userid) {
+            const token = data.accessToken.startsWith('Bearer ')
+                ? data.accessToken
+                : `Bearer ${data.accessToken}`;
 
-      const token = cookieToken || userData?.accessToken;
-      if (!token || !token.startsWith('Bearer ')) {
-        console.log('[AuthService] Invalid token format');
-        this.logout();
-        return false;
-      }
+            const userData = {
+                accessToken: token,
+                userId: data.userid.toString(),
+                role: data.role || 'CUSTOMER',
+                email: data.emailid
+            };
 
-      if (tokenService.isTokenExpired(token)) {
-        console.log('[AuthService] Token expired');
-        this.logout();
-        return false;
-      }
+            localStorage.setItem('authData', JSON.stringify(userData));
+            localStorage.setItem('auth_token', token);
+            tokenService.setTokens(token, null, userData);
+        }
 
-      tokenService.setTokens(
-        token,
-        null,
-        userData?.userId,
-        userData?.role
-      );
+        return data;
+    };
 
-      console.log('[AuthService] Session restored');
-      return true;
-    } catch (error) {
-      console.error('[AuthService] Error restoring session:', error);
-      this.logout();
-      return false;
-    }
-  };
+    refreshToken = async () => {
+        console.log('[AuthService] Refresh token called');
+        return await tokenService.refreshToken();
+    };
+
+    logout = () => {
+        console.log('[AuthService] Logout called');
+        localStorage.removeItem('authData');
+        localStorage.removeItem('auth_token');
+        tokenService.clearTokens();
+    };
+
+    restoreSession = async () => {
+        console.log('[AuthService] restoreSession called');
+        const token = localStorage.getItem('auth_token');
+        const storedData = localStorage.getItem('authData');
+
+        if (!token && !storedData) {
+            console.log('[AuthService] No session found');
+            return false;
+        }
+
+        let userData = storedData ? JSON.parse(storedData) : null;
+
+        if (!token || tokenService.isTokenExpired(token)) {
+            console.log('[AuthService] Token expired, refreshing...');
+            const refreshed = await this.refreshToken();
+            if (!refreshed) {
+                this.logout();
+                return false;
+            }
+        } else if (tokenService.willTokenExpireSoon(token)) {
+            console.log('[AuthService] Token will expire soon, refreshing...');
+            await this.refreshToken();
+        }
+
+        tokenService.setTokens(tokenService.getAccessToken(), null, userData);
+        console.log('[AuthService] Session restored');
+        return true;
+    };
+
+    forgotPassword = async (email) => {
+        try {
+            const response = await fetch(`${API_BASE}/forgotpassword`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'text/plain, application/json'
+                },
+                credentials: 'include',
+                body: JSON.stringify({ email: email })
+            });
+
+            const responseText = await response.text();
+            console.log('[AuthService] Forgot password response:', responseText);
+
+            if (!response.ok) {
+                throw new Error(responseText);
+            }
+
+            try {
+                return JSON.parse(responseText);
+            } catch (e) {
+                return { message: responseText };
+            }
+        } catch (error) {
+            console.error('[AuthService] Forgot password error:', error);
+            throw error;
+        }
+    };
+
+    validateResetOtp = async (email, otp) => {
+        try {
+            const response = await fetch(`${API_BASE}/validate-reset-otp`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'text/plain, application/json'
+                },
+                credentials: 'include',
+                body: JSON.stringify({ 
+                    email: email,
+                    otp: otp 
+                })
+            });
+
+            const responseText = await response.text();
+            console.log('[AuthService] Validate reset OTP response:', responseText);
+
+            if (!response.ok) {
+                throw new Error(responseText);
+            }
+
+            try {
+                return JSON.parse(responseText);
+            } catch (e) {
+                return { message: responseText };
+            }
+        } catch (error) {
+            console.error('[AuthService] Validate reset OTP error:', error);
+            throw error;
+        }
+    };
+
+    resetPassword = async (email, newPassword) => {
+        try {
+            const response = await fetch(`${API_BASE}/reset-password`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'text/plain, application/json'
+                },
+                credentials: 'include',
+                body: JSON.stringify({
+                    email: email,
+                    newPassword: newPassword
+                })
+            });
+
+            const responseText = await response.text();
+            console.log('[AuthService] Reset password response:', responseText);
+
+            if (!response.ok) {
+                throw new Error(responseText);
+            }
+
+            try {
+                return JSON.parse(responseText);
+            } catch (e) {
+                return { message: responseText };
+            }
+        } catch (error) {
+            console.error('[AuthService] Reset password error:', error);
+            throw error;
+        }
+    };
 }
 
 export const authService = new AuthService();

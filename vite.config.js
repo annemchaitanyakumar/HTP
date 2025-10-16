@@ -4,7 +4,51 @@ import path from "path";
 import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ command, mode }) => ({
+  plugins: [
+    react(),
+    mode === "development" && componentTagger(),
+  ].filter(Boolean),
+  build: {
+    sourcemap: false,
+    minify: 'terser',
+    ssrManifest: true, // Enable SSR manifest
+    reportCompressedSize: false, // Hide compressed file sizes
+    chunkSizeWarningLimit: 1000, // Reduce chunk size warnings
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true,
+        pure_funcs: ['console.log', 'console.info', 'console.debug', 'console.warn'],
+        passes: 2,
+        keep_fnames: /^React|^_/
+      },
+      mangle: {
+        keep_fnames: /^React|^_/,
+        keep_classnames: /^React|^_/,
+        safari10: true,
+        properties: false
+      },
+      format: {
+        comments: false
+      }
+    },
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor': [
+            'framer-motion',
+            '@radix-ui/react-hover-card',
+            'lucide-react'
+          ]
+        },
+        entryFileNames: 'assets/[hash].js',
+        chunkFileNames: 'assets/[hash].js',
+        assetFileNames: 'assets/[hash].[ext]'
+      }
+    }
+  },
   server: {
     host: "::",
     port: 3000,
@@ -16,11 +60,9 @@ export default defineConfig(({ mode }) => ({
         ws: true,
         configure: (proxy, options) => {
           proxy.on('proxyReq', (proxyReq, req, res) => {
-            // Forward the Authorization header
             if (req.headers.authorization) {
               proxyReq.setHeader('Authorization', req.headers.authorization);
             }
-
             proxyReq.setHeader('Content-Type', 'application/json');
             
             if (req.body) {
@@ -29,29 +71,13 @@ export default defineConfig(({ mode }) => ({
               proxyReq.write(bodyData);
             }
           });
-
-          proxy.on('proxyRes', (proxyRes, req, res) => {
-            // Log proxy response for debugging
-            console.log(`[Proxy] ${req.method} ${req.url} -> ${proxyRes.statusCode}`);
-          });
-
-          proxy.on('error', (err, req, res) => {
-            console.error('Proxy error:', err);
-            if (!res.headersSent) {
-              res.writeHead(500, {
-                'Content-Type': 'application/json'
-              });
-              res.end(JSON.stringify({ error: 'Proxy error occurred' }));
-            }
-          });
         }
       }
     }
   },
   define: {
-    'process.env': {},
+    'process.env': {}
   },
-  plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -61,5 +87,12 @@ export default defineConfig(({ mode }) => ({
   esbuild: {
     jsxFactory: 'React.createElement',
     jsxFragment: 'React.Fragment',
-  },
+    drop: ['console', 'debugger'],
+    pure: ['console.log', 'console.info', 'console.debug', 'console.warn'],
+    minifyIdentifiers: true,
+    minifySyntax: true,
+    minifyWhitespace: true,
+    treeShaking: true,
+    ignoreAnnotations: true
+  }
 }));

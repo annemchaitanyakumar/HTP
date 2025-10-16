@@ -1,9 +1,11 @@
+// src/services/cartService.js
 const CART_ROUTES = {
   GET_ALL: `/api/all`,
   ADD: `/api/add`,
   UPDATE: `/api/edit`,
-  DELETE: `/api/delete`, // Updated to match backend endpoint
+  DELETE: `/api/delete`,
   CLEAR: `/api/cart/clear`,
+  PACKAGING: `/api/packaging` // new
 };
 
 const headers = {
@@ -15,7 +17,6 @@ export const cartService = {
   async getCartItems() {
     try {
       const token = localStorage.getItem('auth_token') || document.cookie.split('; ').find(row => row.startsWith('auth_token='))?.split('=')[1];
-      console.log('Getting cart items with token:', token);
 
       if (!token) {
         throw new Error('Please login to view your cart');
@@ -31,29 +32,13 @@ export const cartService = {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Error response:', response.status, errorText);
         if (response.status === 403) {
           throw new Error('Please login to access your cart');
         }
-        throw new Error('Failed to fetch cart items');
+        throw new Error(errorText || 'Failed to fetch cart items');
       }
 
       const data = await response.json();
-      console.log('Received cart items:', data);
-      // Debug log for product details comparison
-      console.log('Cart items details:', data.map(item => ({
-        cartId: item.cartId,
-        productId: item.productId,
-        productName: item.productName,
-        productPrice: item.productPrice,
-        productWeight: item.productWeight,
-        quantity: item.quantity,
-        images: {
-          image1: item.productImage1,
-          image2: item.productImage2,
-          image3: item.productImage3
-        }
-      })));
       return data;
     } catch (error) {
       console.error('Error fetching cart items:', error);
@@ -65,33 +50,17 @@ export const cartService = {
   async addToCart(productId, quantity, productWeight, price) {
     try {
       const token = localStorage.getItem('auth_token') || document.cookie.split('; ').find(row => row.startsWith('auth_token='))?.split('=')[1];
-      
-      // Debug log for cart addition
-      console.log('Adding to cart with params:', {
-        url: CART_ROUTES.ADD,
-        productId: parseInt(productId),
-        quantity: parseInt(quantity),
-        productWeight,
-        price,
-        token: token ? 'Token exists' : 'No token'
-      });
 
       if (!token) {
         throw new Error('Please login to add items to cart');
       }
 
-      // Prepare request body
       const requestBody = {
         productId: parseInt(productId),
         quantity: parseInt(quantity),
         productWeight: productWeight,
-        productPrice: parseFloat(price) // Ensure price is a number
+        productPrice: parseFloat(price)
       };
-
-      console.log('Sending request to backend:', {
-        url: CART_ROUTES.ADD,
-        body: requestBody
-      });
 
       const response = await fetch(CART_ROUTES.ADD, {
         method: 'POST',
@@ -103,7 +72,6 @@ export const cartService = {
       });
 
       const responseData = await response.text();
-      console.log('Raw response:', responseData);
 
       if (!response.ok) {
         if (response.status === 403) {
@@ -113,11 +81,8 @@ export const cartService = {
       }
 
       try {
-        const parsedData = JSON.parse(responseData);
-        console.log('Successfully added to cart:', parsedData);
-        return parsedData;
+        return JSON.parse(responseData);
       } catch (e) {
-        console.error('Failed to parse response:', e);
         throw new Error('Invalid response from server');
       }
     } catch (error) {
@@ -134,35 +99,24 @@ export const cartService = {
         throw new Error('Please login to remove items from cart');
       }
 
-      console.log('Removing item from cart:', {
-        url: CART_ROUTES.DELETE,
-        cartId: parseInt(cartId),
-        token,
-      });
-
       const response = await fetch(CART_ROUTES.DELETE, {
         method: 'DELETE',
         headers: {
           ...headers,
           Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          cartId: parseInt(cartId),
-        }),
+        body: JSON.stringify({ cartId: parseInt(cartId) }),
       });
 
       const rawResponse = await response.text();
-      console.log('Raw delete response:', rawResponse);
 
       if (!response.ok) {
-        console.error('Delete error response:', response.status, rawResponse);
         if (response.status === 403) {
           throw new Error('Please login to remove items from cart');
         }
         throw new Error(rawResponse || 'Failed to remove item from cart');
       }
 
-      console.log('Item successfully removed from cart');
       return true;
     } catch (error) {
       console.error('Error removing from cart:', error);
@@ -203,6 +157,34 @@ export const cartService = {
     }
   },
 
+  // Update packaging (persist isContainer boolean)
+  async updatePackaging(cartId, isContainer) {
+    try {
+      const token = localStorage.getItem('auth_token') || document.cookie.split('; ').find(row => row.startsWith('auth_token='))?.split('=')[1];
+      if (!token) throw new Error('Please login to update packaging');
+
+      // using controller: PUT /api/packaging/{cartId}?isContainer=true
+      const url = `${CART_ROUTES.PACKAGING}/${encodeURIComponent(cartId)}?isContainer=${isContainer}`;
+      const resp = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          ...headers,
+          Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}`,
+        },
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(errText || 'Failed to update packaging');
+      }
+
+      return await resp.json(); // CartProductDTO
+    } catch (err) {
+      console.error('updatePackaging error', err);
+      throw err;
+    }
+  },
+
   // Clear entire cart
   async clearCart() {
     try {
@@ -221,11 +203,9 @@ export const cartService = {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Clear cart error response:', response.status, errorText);
         throw new Error(errorText || 'Failed to clear cart');
       }
 
-      console.log('Cart successfully cleared');
       return true;
     } catch (error) {
       console.error('Error clearing cart:', error);

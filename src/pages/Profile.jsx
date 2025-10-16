@@ -1,56 +1,215 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { cn } from '@/lib/utils.js';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Toaster } from "@/components/ui/toaster"
 import { useToast } from "@/hooks/use-toast";
+import { Textarea } from "@/components/ui/textarea";
 import {
   InputOTP,
   InputOTPGroup,
-  InputOTPSeparator,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
-import { User, MapPin, Package, Lock, Plus, ShoppingBag } from 'lucide-react';
+import { User, MapPin, Package, Plus, ShoppingBag, X, Printer } from 'lucide-react';
 import { userService } from '@/services/userService';
+import { addressService } from '@/services/addressService';
+import { getUserOrders } from '@/services/orderService';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import axios from 'axios';
+import { 
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger 
+} from "@/components/ui/collapsible";
+import { ChevronDown } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { formatDate, isWithinLast6Months } from '@/lib/utils';
+import { format } from "date-fns";
+import { useReactToPrint } from 'react-to-print';
+import OrderInvoice from '@/components/OrderInvoice';
+import { createRoot } from 'react-dom/client';
 
-export default function Profile() {
-  const [activeTab, setActiveTab] = useState('account');
-  const [loading, setLoading] = useState(true); // Initialize loading as true
-  const [profileData, setProfileData] = useState(null);
-  const [error, setError] = useState('');
+const plainAxios = axios.create();
+
+const Profile = () => {
   const { toast } = useToast();
-  const navigate = useNavigate();
+  const location = useLocation();
+  const [activeTab, setActiveTab] = useState(
+    location.state?.activeTab || "account"
+  );
 
-  // New state variables for editing
+  // Move the useEffect after hooks initialization
+  useEffect(() => {
+    if (location.state?.paymentSuccess) {
+      toast({
+        title: "Payment Successful",
+        description: "Your order has been placed successfully!"
+      });
+      fetchOrders();
+    }
+  }, [location.state]);
+
+  // useEffect(() => {
+  //   // Handle redirect from payment success
+  //   if (location.state?.activeTab) {
+  //     setActiveTab(location.state.activeTab);
+      
+  //     // If payment was successful, show success toast
+  //     if (location.state?.paymentSuccess) {
+  //       toast({
+  //         title: "Payment Successful",
+  //         description: "Your order has been placed successfully!",
+  //         variant: "success",
+  //       });
+        
+  //       // Clear the state after showing toast
+  //       window.history.replaceState({}, document.title);
+  //     }
+  //   }
+  // }, [location.state, toast]);
+
+  // // Force refresh orders when coming from successful payment
+  // useEffect(() => {
+  //   if (location.state?.paymentSuccess) {
+  //     fetchOrders();
+  //   }
+  // }, [location.state?.paymentSuccess]);
+
+  const [loading, setLoading] = useState(true);
+  const [profileData, setProfileData] = useState(null);
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [orderDetailsOpen, setOrderDetailsOpen] = useState(false);
+  const [orderProducts, setOrderProducts] = useState([]);
+  const [orderAddress, setOrderAddress] = useState(null);
+  const [error, setError] = useState('');
+  const navigate = useNavigate();
   const [editMode, setEditMode] = useState(false);
   const [editedData, setEditedData] = useState({});
   const [isSaveButtonEnabled, setIsSaveButtonEnabled] = useState(false);
-
-  // New state variables for OTP verification
   const [otpDialogOpen, setOtpDialogOpen] = useState(false);
   const [otp, setOtp] = useState('');
+  const [addressDialogOpen, setAddressDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [addressToDelete, setAddressToDelete] = useState(null);
+  const [userAddresses, setUserAddresses] = useState([]);
+  const [addressLoading, setAddressLoading] = useState(false);
+  const [editingAddress, setEditingAddress] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [touched, setTouched] = useState({});
+  const [addressFormData, setAddressFormData] = useState({
+    firstName: '',
+    lastName: '',
+    streetAddress: '',
+    city: '',
+    state: '',
+    pinCode: '',
+    email: '',
+    mobileNumber: ''
+  });
+  const [isOpen, setIsOpen] = useState(false); // Moved inside the component
+  const [currentPage, setCurrentPage] = useState(1);
+  const [timeFilter, setTimeFilter] = useState('all');
+  const [yearFilter, setYearFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const ordersPerPage = 5;
+  const invoiceRef = useRef(null);
+
+  // Form validation utility functions
+  const validators = {
+    email: (value) => {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return emailRegex.test(value.trim());
+    },
+    phone: (value) => {
+      const phoneRegex = /^[6-9]\d{9}$/;
+      return phoneRegex.test(value);
+    },
+    pinCode: (value) => {
+      return /^\d{6}$/.test(value);
+    },
+    name: (value) => {
+      return value.trim().length >= 2;
+    },
+    address: (value) => {
+      return value.trim().length >= 10;
+    }
+  };
+
+  const validationMessages = {
+    required: (field) => `${field} is required`,
+    email: 'Please enter a valid email address',
+    phone: 'Please enter a valid 10-digit mobile number starting with 6-9',
+    pinCode: 'Please enter a valid 6-digit PIN code',
+    name: (field) => `${field} should be at least 2 characters`,
+    address: 'Please enter a detailed street address (minimum 10 characters)'
+  };
+
+  const validateField = (field, value) => {
+    if (!value.trim() && field !== 'lastName') {
+      return validationMessages.required(field.replace(/([A-Z])/g, ' $1').trim());
+    }
+
+    switch (field) {
+      case 'firstName':
+        return validators.name(value) ? null : validationMessages.name('First name');
+      case 'lastName':
+        return value ? (validators.name(value) ? null : validationMessages.name('Last name')) : null;
+      case 'email':
+        return validators.email(value) ? null : validationMessages.email;
+      case 'mobileNumber':
+        return validators.phone(value) ? null : validationMessages.phone;
+      case 'streetAddress':
+        return validators.address(value) ? null : validationMessages.address;
+      case 'pinCode':
+        return validators.pinCode(value) ? null : validationMessages.pinCode;
+      case 'city':
+      case 'state':
+        return value.trim() ? null : validationMessages.required(field);
+      default:
+        return null;
+    }
+  };
 
   const fetchProfileData = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
       const data = await userService.getUserInfo();
-      console.log('Fetched profile data:', data); // Log the fetched data
+      console.log('Fetched profile data:', data);
       setProfileData(data);
-      setEditedData(data); // Initialize editedData with fetched data
+      setEditedData(data);
     } catch (err) {
       console.error('Error fetching profile:', err);
       setError(err.message || 'Failed to load profile data');
@@ -62,16 +221,444 @@ export default function Profile() {
     } finally {
       setLoading(false);
     }
-  }, [userService, toast]);
+  }, [toast]);
 
   useEffect(() => {
     fetchProfileData();
+    fetchAddresses();
   }, [fetchProfileData]);
 
-  // Function to handle input changes
+  const fetchProductById = async (id) => {
+    try {
+      const response = await plainAxios.get(`http://localhost:8000/api/products/${id}`);
+      return response.data;
+    } catch (err) {
+      console.warn('[Profile] Failed to fetch product', id, err);
+      return null;
+    }
+  };
+
+  const fetchPresignedUrls = async (productId) => {
+    try {
+      const presignedUrlsUrl = `http://localhost:8000/api/products/${productId}/presigned-urls/`;
+      const response = await plainAxios.get(presignedUrlsUrl);
+      return response.data || {};
+    } catch (err) {
+      console.warn('[Profile] Failed to fetch presigned urls for product', productId, err);
+      return {};
+    }
+  };
+
+  const fetchAddresses = async () => {
+    try {
+      setAddressLoading(true);
+      console.log('Fetching addresses...');
+      const addresses = await addressService.getAllAddresses();
+      console.log('Fetched addresses:', addresses);
+      setUserAddresses(addresses);
+    } catch (error) {
+      console.error('Error fetching addresses:', error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to fetch addresses"
+      });
+    } finally {
+      setAddressLoading(false);
+    }
+  };
+
+  const fetchOrders = async () => {
+    try {
+      setOrdersLoading(true);
+      const res = await getUserOrders();
+      const list = Array.isArray(res) ? res : (res?.data || []);
+
+      // Fetch addresses
+      const addresses = await addressService.getAllAddresses();
+      const addressMap = addresses.reduce((map, addr) => {
+        map[addr.addressId || addr.id] = addr;
+        return map;
+      }, {});
+
+      // Collect all unique product IDs from orders
+      const allIdsSet = new Set();
+      list.forEach(order => {
+        if (order.product_list) {
+          try {
+            const parsed = typeof order.product_list === 'string' ? JSON.parse(order.product_list) : order.product_list;
+            if (Array.isArray(parsed)) {
+              parsed.forEach(p => {
+                if (p.product_id) allIdsSet.add(String(p.product_id));
+              });
+            }
+          } catch (e) {
+            console.warn('Error parsing product_list:', e);
+          }
+        }
+      });
+      const allIds = Array.from(allIdsSet);
+
+      // Fetch product details and presigned URLs
+      const productMap = {};
+      const presignedMap = {};
+      if (allIds.length) {
+        await Promise.all(allIds.map(async (pid) => {
+          const [product, urls] = await Promise.all([
+            fetchProductById(pid),
+            fetchPresignedUrls(pid)
+          ]);
+          if (product) productMap[pid] = product;
+          presignedMap[pid] = urls;
+        }));
+      }
+
+      // Enrich orders with product details, prices, and address
+      const enriched = await Promise.all(list.map(async order => {
+        let items = [];
+        if (order.product_list) {
+          try {
+            const parsed = typeof order.product_list === 'string' ? JSON.parse(order.product_list) : order.product_list;
+            if (Array.isArray(parsed)) {
+              items = await Promise.all(parsed.map(async p => {
+                const pid = String(p.product_id);
+                const product = productMap[pid] || {};
+                const urls = presignedMap[pid] || {};
+                const image = urls.product_image1_url || urls.product_image_url || '/placeholder.png';
+
+                // Fix price calculation
+                let price = 0;
+                if (product?.price_by_weight && p.weight) {
+                  price = parseFloat(product.price_by_weight[p.weight]) || 0;
+                } else if (p.productPrice) {
+                  price = parseFloat(p.productPrice) || 0;
+                }
+
+                const quantity = parseInt(p.quantity) || 0;
+                const total = quantity * price;
+
+                return {
+                  ...p,
+                  productName: product.product_name || p.productname || 'Unknown Product',
+                  image,
+                  price,
+                  total,
+                  quantity
+                };
+              }));
+            }
+          } catch (e) {
+            console.error('Error parsing order:', e, order);
+          }
+        }
+
+        // Calculate order totals with GST and shipping
+        const subtotal = items.reduce((sum, item) => sum + item.total, 0);
+        const gstPercentage = 5; // Fixed 5% GST
+        const gstAmount = (subtotal * gstPercentage) / 100;
+        const containerCharges = parseFloat(order.containerCharges || 0);
+        
+        // Calculate shipping based on subtotal
+        const orderValueBeforeShipping = subtotal + gstAmount + containerCharges;
+        const shippingCharges = orderValueBeforeShipping < 500 ? 50 : 0;
+
+        // Calculate final total
+        const total = orderValueBeforeShipping + shippingCharges;
+
+        // Assume the first address is used if no addressId is provided
+        const address = addresses.length > 0 ? addresses[0] : null;
+
+        return {
+          ...order,
+          items,
+          subtotal,
+          gstPercentage,
+          gstAmount,
+          containerCharges,
+          shippingCharges,
+          total,
+          address: address || userAddresses[0]
+        };
+      }));
+
+      setOrders(enriched);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to fetch orders"
+      });
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (profileData?.userid) {
+      fetchOrders();
+    }
+  }, [profileData]);
+
+  const validateAddressForm = (showToasts = false) => {
+    const requiredFields = {
+      firstName: "First Name",
+      email: "Email",
+      mobileNumber: "Mobile Number",
+      streetAddress: "Street Address",
+      city: "City",
+      state: "State",
+      pinCode: "PIN Code"
+    };
+
+    let hasErrors = false;
+
+    const emptyFields = Object.entries(requiredFields).filter(
+      ([field]) => !addressFormData[field]?.trim()
+    );
+
+    if (emptyFields.length > 0) {
+      const newErrors = {};
+      emptyFields.forEach(([field, fieldName]) => {
+        newErrors[field] = `${fieldName} is required`;
+        if (showToasts) {
+          toast({
+            variant: "destructive",
+            title: "Required Field Empty",
+            description: `${fieldName} is required`
+          });
+        }
+      });
+      setFieldErrors(prev => ({
+        ...prev,
+        ...newErrors
+      }));
+      hasErrors = true;
+    }
+
+    const fieldErrors = {};
+    Object.keys(addressFormData).forEach(field => {
+      if (addressFormData[field]?.trim()) {
+        const error = validateField(field, addressFormData[field]);
+        if (error) {
+          fieldErrors[field] = error;
+          if (showToasts) {
+            toast({
+              variant: "destructive",
+              title: "Validation Error",
+              description: error
+            });
+          }
+          hasErrors = true;
+        }
+      }
+    });
+
+    setFieldErrors(prev => ({
+      ...prev,
+      ...fieldErrors
+    }));
+
+    return !hasErrors;
+  };
+
+  const resetAddressForm = () => {
+    setAddressFormData({
+      firstName: '',
+      lastName: '',
+      streetAddress: '',
+      city: '',
+      state: '',
+      pinCode: '',
+      email: '',
+      mobileNumber: ''
+    });
+    setTouched({});
+    setFieldErrors({});
+  };
+
+  const handleAddAddress = async () => {
+    setTouched(prev => ({
+      ...prev,
+      ...Object.keys(addressFormData).reduce((acc, field) => ({ ...acc, [field]: true }), {})
+    }));
+
+    if (!validateAddressForm(true)) {
+      return;
+    }
+
+    try {
+      setAddressLoading(true);
+      if (!profileData) {
+        const userData = await userService.getUserInfo();
+        setProfileData(userData);
+      }
+
+      const addressData = {
+        firstName: addressFormData.firstName.trim(),
+        lastName: addressFormData.lastName.trim(),
+        email: addressFormData.email.trim(),
+        mobileNumber: addressFormData.mobileNumber.trim(),
+        streetAddress: addressFormData.streetAddress.trim(),
+        city: addressFormData.city.trim(),
+        state: addressFormData.state.trim(),
+        pinCode: addressFormData.pinCode.trim()
+      };
+
+      await addressService.addAddress(addressData);
+      await fetchAddresses();
+      setAddressDialogOpen(false);
+      resetAddressForm();
+      toast({
+        title: "Success",
+        description: "Address added successfully"
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to add address"
+      });
+    } finally {
+      setAddressLoading(false);
+    }
+  };
+
+  const handleEditAddress = (address) => {
+    setEditingAddress({
+      ...address,
+      id: address.addressId || address.id
+    });
+    setAddressFormData({
+      firstName: address.firstName || '',
+      lastName: address.lastName || '',
+      streetAddress: address.streetAddress || '',
+      city: address.city || '',
+      state: address.state || '',
+      pinCode: address.pinCode || '',
+      email: address.email || '',
+      mobileNumber: address.mobileNumber || ''
+    });
+    setTouched({});
+    setFieldErrors({});
+    setAddressDialogOpen(true);
+  };
+
+  const handleUpdateAddress = async () => {
+    setTouched(prev => ({
+      ...prev,
+      ...Object.keys(addressFormData).reduce((acc, field) => ({ ...acc, [field]: true }), {})
+    }));
+
+    if (!validateAddressForm(true)) {
+      return;
+    }
+
+    try {
+      setAddressLoading(true);
+      await addressService.editAddress(editingAddress.id, addressFormData);
+      await fetchAddresses();
+      setAddressDialogOpen(false);
+      setEditingAddress(null);
+      toast({
+        title: "Success",
+        description: "Address updated successfully"
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to update address"
+      });
+    } finally {
+      setAddressLoading(false);
+    }
+  };
+
+  const handleDeleteAddress = async () => {
+    if (!addressToDelete) return;
+
+    try {
+      setAddressLoading(true);
+      await addressService.deleteAddress(addressToDelete);
+      await fetchAddresses();
+      toast({
+        title: "Success",
+        description: "Address deleted successfully"
+      });
+      setDeleteDialogOpen(false);
+      setAddressToDelete(null);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to delete address"
+      });
+    } finally {
+      setAddressLoading(false);
+    }
+  };
+
+  const openDeleteDialog = (addressId) => {
+    setAddressToDelete(addressId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleAddressInputChange = async (e) => {
+    const { id, value } = e.target;
+    let processedValue = value;
+
+    if (id === 'pinCode') {
+      processedValue = value.replace(/\D/g, '').slice(0, 6);
+    } else if (id === 'mobileNumber') {
+      processedValue = value.replace(/\D/g, '').slice(0, 10);
+    }
+
+    let timeoutId;
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      setTouched(prev => ({ ...prev, [id]: true }));
+      const error = validateField(id, processedValue);
+      setFieldErrors(prev => ({
+        ...prev,
+        [id]: error
+      }));
+    }, 500);
+
+    setAddressFormData(prev => ({
+      ...prev,
+      [id]: processedValue
+    }));
+
+    if (id === 'pinCode' && processedValue.length === 6) {
+      try {
+        const response = await fetch(`https://api.postalpincode.in/pincode/${processedValue}`);
+        const data = await response.json();
+        if (data[0].Status === "Success") {
+          const location = data[0].PostOffice[0];
+          setAddressFormData(prev => ({
+            ...prev,
+            city: `${location.Name}, ${location.District}`,
+            state: location.State
+          }));
+          setFieldErrors(prev => ({
+            ...prev,
+            city: null,
+            state: null
+          }));
+          setTouched(prev => ({
+            ...prev,
+            city: true,
+            state: true
+          }));
+        }
+      } catch (error) {
+        console.error('Error fetching pincode data:', error);
+      }
+    }
+  };
+
   const handleInputChange = (e) => {
     const { id, value } = e.target;
-    // Map the HTML input ids to the backend DTO field names
     const fieldMapping = {
       'mobile': 'mobilenum',
       'email': 'emailid'
@@ -83,7 +670,6 @@ export default function Profile() {
     }));
   };
 
-  // Function to enable Save Changes button if data has been modified
   useEffect(() => {
     if (profileData && editedData) {
       const hasChanges =
@@ -95,7 +681,6 @@ export default function Profile() {
     }
   }, [editedData, profileData]);
 
-  // Function to send OTP for verification
   const handleSendOtp = async () => {
     try {
       setLoading(true);
@@ -107,8 +692,6 @@ export default function Profile() {
         emailid: editedData.emailid,
         mobilenum: editedData.mobilenum
       };
-      
-      // Send OTP
       const response = await userService.sendOtpForUpdate(editUserDTO);
       console.log('OTP sent response:', response);
       setOtpDialogOpen(true);
@@ -120,7 +703,6 @@ export default function Profile() {
     }
   };
 
-  // Function to validate OTP and update user details
   const handleUpdateProfile = async () => {
     try {
       setLoading(true);
@@ -132,13 +714,11 @@ export default function Profile() {
         emailid: editedData.emailid,
         mobilenum: editedData.mobilenum
       };
-      
       const updatedUser = await userService.updateUserInfo(validateDTO);
       setProfileData(updatedUser);
       setEditMode(false);
       setOtpDialogOpen(false);
       setOtp('');
-      // Update AuthContext with new user data
       localStorage.setItem('authData', JSON.stringify(updatedUser));
       toast({
         title: "Success",
@@ -156,6 +736,163 @@ export default function Profile() {
     }
   };
 
+  const handleViewOrderDetails = async (order) => {
+    try {
+      setSelectedOrder(order);
+      setOrderDetailsOpen(true);
+      let productList = [];
+      try {
+        productList = typeof order.product_list === 'string' ? JSON.parse(order.product_list) : order.product_list;
+      } catch (error) {
+        console.warn('Error parsing product_list:', error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to parse order details"
+        });
+        return;
+      }
+
+      if (!Array.isArray(productList)) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Invalid product list format"
+        });
+        return;
+      }
+
+      // Fetch presigned URLs and product details for all products in the order
+      const productDetails = await Promise.all(productList.map(async (item) => {
+        const pid = String(item.product_id);
+        const [urls, product] = await Promise.all([
+          fetchPresignedUrls(pid),
+          fetchProductById(pid)
+        ]);
+        const image = urls.product_image1_url || urls.product_image_url || '/placeholder.png';
+
+        // Determine price
+        let price = 0;
+        if (product && product.price_by_weight && item.weight) {
+          price = parseFloat(product.price_by_weight[item.weight]) || 0;
+        } else if (item.productPrice) {
+          price = parseFloat(item.productPrice) || 0;
+        }
+
+        return {
+          product_name: item.productname || product?.product_name || `Product ${item.product_id}`,
+          quantity: item.quantity,
+          weight: item.weight,
+          unitPrice: price,
+          totalPrice: item.quantity * price,
+          product_image: image
+        };
+      }));
+
+      // Set address (use order.address if available, else fallback to first user address)
+      setOrderAddress(order.address || (userAddresses.length > 0 ? userAddresses[0] : null));
+      setOrderProducts(productDetails);
+      setOrderDetailsOpen(true);
+    } catch (error) {
+      console.error('Error loading order details:', error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to load order details"
+      });
+    }
+  };
+
+  const formatCurrency = (value, isPaise = false) => {
+    if (value == null) return '₹0';
+    // If value is in paise, convert to rupees
+    const amount = isPaise ? Number(value) / 100 : Number(value);
+    return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
+  const filterOrders = (orders) => {
+    if (!orders) return [];
+    
+    return orders.filter(order => {
+      // Time period filter
+      if (timeFilter === 'last6months' && !isWithinLast6Months(order.createdTime)) {
+        return false;
+      }
+
+      // Year filter
+      if (yearFilter !== 'all') {
+        const orderYear = new Date(order.createdTime).getFullYear().toString();
+        if (orderYear !== yearFilter) {
+          return false;
+        }
+      }
+
+      // Status filter
+      if (statusFilter !== 'all' && order.payment_status !== statusFilter) {
+        return false;
+      }
+
+      return true;
+    }).sort((a, b) => (b.createdTime || 0) - (a.createdTime || 0)); // Sort by newest first
+  };
+
+  const getPaginatedOrders = (orders) => {
+    const filtered = filterOrders(orders);
+    const lastIndex = currentPage * ordersPerPage;
+    const firstIndex = lastIndex - ordersPerPage;
+    return {
+      orders: filtered.slice(firstIndex, lastIndex),
+      totalPages: Math.ceil(filtered.length / ordersPerPage)
+    };
+  };
+
+  const getYearRange = () => {
+    const currentYear = new Date().getFullYear();
+    const startYear = 2025; // Base starting year
+    const years = [];
+    
+    for (let year = currentYear; year >= startYear; year--) {
+      years.push(year);
+    }
+    return years;
+  };
+
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      .hide-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+      .hide-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
+
+  // Print handler
+  const handlePrintInvoice = useReactToPrint({
+    content: () => invoiceRef.current,
+    documentTitle: `Invoice-${selectedOrder?.orderid || 'unknown'}`,
+    removeAfterPrint: true,
+    pageStyle: `
+      @page {
+        size: A4;
+        margin: 20mm;
+      }
+      @media print {
+        body {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+      }
+    `,
+  });
+
+  const logoPath = '/logo.png'; // Assuming logo.png is in the public folder
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
@@ -169,22 +906,18 @@ export default function Profile() {
           <Card className="w-full max-w-4xl mx-auto">
             <CardContent className="p-4 sm:p-6">
               <Tabs defaultValue={activeTab} value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
-                  <TabsTrigger value="account" className="data-[state=active]:bg-primary">
-                    <User className="h-4 w-4 mr-2" />
-                    Account
+                <TabsList className="flex w-full overflow-x-auto hide-scrollbar gap-2 p-1">
+                  <TabsTrigger value="account" className="data-[state=active]:bg-primary text-xs sm:text-sm px-4 h-9 flex-shrink-0">
+                    <User className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                    <span>Account</span>
                   </TabsTrigger>
-                  <TabsTrigger value="addresses">
-                    <MapPin className="h-4 w-4 mr-2" />
-                    Addresses
+                  <TabsTrigger value="addresses" className="text-xs sm:text-sm px-4 h-9 flex-shrink-0">
+                    <MapPin className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                    <span>Addresses</span>
                   </TabsTrigger>
-                  <TabsTrigger value="orders">
-                    <Package className="h-4 w-4 mr-2" />
-                    Orders
-                  </TabsTrigger>
-                  <TabsTrigger value="security">
-                    <Lock className="h-4 w-4 mr-2" />
-                    Security
+                  <TabsTrigger value="orders" className="text-xs sm:text-sm px-4 h-9 flex-shrink-0">
+                    <Package className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                    <span>Orders</span>
                   </TabsTrigger>
                 </TabsList>
 
@@ -275,83 +1008,534 @@ export default function Profile() {
 
                   <TabsContent value="addresses">
                     <div className="space-y-6">
-                      <h3 className="text-lg sm:text-xl font-medium">Saved Addresses</h3>
-                      <div className="space-y-4">
-                        <p className="text-muted-foreground text-sm sm:text-base">No addresses saved yet.</p>
-                        <Button className="w-full sm:w-auto">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-lg sm:text-xl font-medium">Saved Addresses</h3>
+                        <Button
+                          onClick={() => setAddressDialogOpen(true)}
+                          disabled={userAddresses.length >= 3}
+                          className="w-auto"
+                        >
                           <Plus className="w-4 h-4 mr-2" />
                           Add New Address
                         </Button>
                       </div>
+
+                      {addressLoading ? (
+                        <div className="flex justify-center py-8">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+                        </div>
+                      ) : userAddresses.length > 0 ? (
+                        <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
+                          {userAddresses.map((address) => (
+                            <Card key={address.id} className="relative">
+                              <CardContent className="p-4">
+                                <div className="absolute top-2 right-2 space-x-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleEditAddress(address)}
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                      <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                                    </svg>
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => openDeleteDialog(address.addressId)}
+                                    disabled={userAddresses.length <= 1}
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                      <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 00-1-1z" clipRule="evenodd" />
+                                    </svg>
+                                  </Button>
+                                </div>
+                                <div className="space-y-2 pt-4">
+                                  <p className="font-medium">{address.firstName} {address.lastName || address.lastname}</p>
+                                  <p className="text-sm text-muted-foreground">{address.streetAddress}</p>
+                                  <p className="text-sm text-muted-foreground">{address.city}, {address.state} {address.pinCode}</p>
+                                  <p className="text-sm text-muted-foreground">Phone: {address.mobileNumber}</p>
+                                  <p className="text-sm text-muted-foreground">Email: {address.email}</p>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-muted-foreground text-sm sm:text-base">No addresses saved yet.</p>
+                      )}
                     </div>
                   </TabsContent>
 
                   <TabsContent value="orders">
-                    <div className="space-y-6">
-                      <h3 className="text-lg sm:text-xl font-medium">Order History</h3>
-                      <div className="space-y-4">
-                        <p className="text-muted-foreground text-sm sm:text-base">No orders found.</p>
-                        <Button variant="secondary" className="w-full sm:w-auto" onClick={() => navigate("/products")}>
-                          <ShoppingBag className="w-4 h-4 mr-2" />
-                          Browse Products
-                        </Button>
-                      </div>
-                    </div>
-                  </TabsContent>
+                    <div className="space-y-4">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <h2 className="text-xl font-medium text-gray-900">Your Orders</h2>
+                        <div className="flex flex-wrap gap-2">
+                          <Select value={timeFilter} onValueChange={setTimeFilter}>
+                            <SelectTrigger className="w-[140px] h-8">
+                              <SelectValue placeholder="Time period" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Time</SelectItem>
+                              <SelectItem value="last6months">Last 6 Months</SelectItem>
+                            </SelectContent>
+                          </Select>
 
-                  <TabsContent value="security">
-                    <div className="space-y-6">
-                      <h3 className="text-lg sm:text-xl font-medium">Security Settings</h3>
-                      <form className="space-y-6 max-w-md">
-                        <div className="space-y-2">
-                          <Label htmlFor="currentPassword" className="text-sm sm:text-base">Current Password</Label>
-                          <Input 
-                            type="password" 
-                            id="currentPassword"
-                            className="h-9 sm:h-10" 
-                          />
+                          <Select value={yearFilter} onValueChange={setYearFilter}>
+                            <SelectTrigger className="w-[120px] h-8">
+                              <SelectValue placeholder="Select Year" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Years</SelectItem>
+                              {getYearRange().map(year => (
+                                <SelectItem key={year} value={year.toString()}>
+                                  {year}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+
+                          <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="w-[140px] h-8">
+                              <SelectValue placeholder="Payment Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Status</SelectItem>
+                              <SelectItem value="SUCCESS">Successful</SelectItem>
+                              <SelectItem value="FAILED">Failed</SelectItem>
+                              <SelectItem value="PENDING">Pending</SelectItem>
+                              <SelectItem value="EXPIRED">Expired</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="newPassword" className="text-sm sm:text-base">New Password</Label>
-                          <Input 
-                            type="password" 
-                            id="newPassword"
-                            className="h-9 sm:h-10" 
-                          />
+                      </div>
+
+                      {ordersLoading ? (
+                        <div className="space-y-3">
+                          {[1, 2, 3].map((i) => (
+                            <Card key={i} className="w-full animate-pulse">
+                              <CardContent className="p-3">
+                                <div className="h-4 bg-gray-200 rounded w-1/4 mb-3"></div>
+                                <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+                                <div className="h-4 bg-gray-200 rounded w-1/3"></div>
+                              </CardContent>
+                            </Card>
+                          ))}
                         </div>
-                        <Button type="submit" className="w-full sm:w-auto">Update Password</Button>
-                      </form>
+                      ) : orders.length === 0 ? (
+                        <Card>
+                          <CardContent className="p-5 text-center">
+                            <ShoppingBag className="h-10 w-10 mx-auto mb-3 text-gray-400" />
+                            <p className="text-base font-medium">No orders yet</p>
+                            <p className="text-sm text-gray-500 mt-1">When you place orders, they will appear here.</p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="mt-3"
+                              onClick={() => navigate('/products')}
+                            >
+                              Start Shopping
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      ) : (
+                        <>
+                          <div className="space-y-3">
+                            {getPaginatedOrders(orders).orders.map((order) => (
+                              <Card key={order.orderid} className="overflow-hidden hover:shadow-md transition-shadow">
+                                <CardContent className="p-3">
+                                  {/* Order Header */}
+                                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pb-2 border-b">
+                                    <div className="flex items-center gap-6">
+                                      <div>
+                                        <div className="text-[13px] text-gray-500">Order #</div>
+                                        <div className="text-sm font-medium">{order.orderid}</div>
+                                      </div>
+                                      <div>
+                                        <div className="text-[13px] text-gray-500">Amount</div>
+                                        <div className="text-sm font-medium">
+                                          {formatCurrency(order.total_amount_paid, true)}
+                                          {order.discounted_amount > 0 && (
+                                            <span className="text-[11px] text-emerald-600 ml-2">
+                                              (Save {formatCurrency(order.discounted_amount, true)})
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <div className="text-[13px] text-gray-500">Created</div>
+                                        <div className="text-sm">{formatDate(order.createdTime)}</div>
+                                      </div>
+                                    </div>
+                                    <div className="ml-auto flex flex-col md:flex-row items-end md:items-center gap-2 md:gap-3">
+                                      <div className="text-right order-2 md:order-1">
+                                        <div className="text-[13px] font-medium">
+                                          <span className={cn(
+                                            order.payment_status === 'SUCCESS' ? 'text-emerald-600' :
+                                            order.payment_status === 'FAILED' ? 'text-red-600' :
+                                            order.payment_status === 'EXPIRED' ? 'text-gray-600' :
+                                            'text-amber-600'
+                                          )}>
+                                            {order.payment_status === 'SUCCESS' ? 'Payment Successful' :
+                                             order.payment_status === 'FAILED' ? 'Payment Failed' :
+                                             order.payment_status === 'EXPIRED' ? 'Order Expired' :
+                                             order.payment_status === 'PENDING' ? 'Payment Pending' :
+                                             'Order Created'}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 px-3 order-1 md:order-2"
+                                        onClick={() => handleViewOrderDetails(order)}
+                                      >
+                                        View Details
+                                      </Button>
+                                    </div>
+                                  </div>
+
+                                  {/* Mobile Accordion for Products */}
+                                  {order.items && order.items.length > 0 && (
+                                    <div className="mt-2 md:hidden">
+                                      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+                                        <CollapsibleTrigger asChild>
+                                          <Button variant="ghost" className="w-full justify-between h-8 px-2">
+                                            <span className="text-sm font-medium">
+                                              {order.items.length} {order.items.length === 1 ? 'Product' : 'Products'}
+                                            </span>
+                                            <ChevronDown 
+                                              className={cn(
+                                                "h-5 w-5 text-gray-500 transition-transform duration-200",
+                                                isOpen && "rotate-180"
+                                              )}
+                                            />
+                                          </Button>
+                                        </CollapsibleTrigger>
+                                        <CollapsibleContent className="space-y-2 pt-2">
+                                          {order.items.map((product, index) => (
+                                            <div key={index} className="flex gap-3 py-2">
+                                              <img
+                                                src={product.image}
+                                                alt={product.productName}
+                                                className="w-16 h-16 object-cover rounded-md border"
+                                                onError={(e) => e.target.src = '/placeholder.png'}
+                                              />
+                                              <div className="flex-1 min-w-0">
+                                                <div className="flex justify-between items-start gap-2">
+                                                  <div className="text-sm font-medium truncate">{product.productName}</div>
+                                                  <div className="text-sm font-medium whitespace-nowrap">
+                                                    {formatCurrency(product.total)}
+                                                  </div>
+                                                </div>
+                                                <div className="text-[13px] text-gray-500 mt-0.5">
+                                                  Qty: {product.quantity}, Weight: {product.weight}
+                                                </div>
+                                                <div className="text-[13px] text-gray-500 mt-0.5">
+                                                  Unit Price: {formatCurrency(product.price)}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </CollapsibleContent>
+                                      </Collapsible>
+                                    </div>
+                                  )}
+
+                                  {/* Product List for Large Screens */}
+                                  {order.items && order.items.length > 0 && (
+                                    <div className="hidden md:block mt-2">
+                                      <div className="space-y-2">
+                                        {order.items.map((product, index) => (
+                                          <div key={index} className="flex gap-3 py-2">
+                                            <img
+                                              src={product.image}
+                                              alt={product.productName}
+                                              className="w-16 h-16 object-cover rounded-md border"
+                                              onError={(e) => e.target.src = '/placeholder.png'}
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                              <div className="flex justify-between items-start gap-2">
+                                                <div className="text-sm font-medium truncate">{product.productName}</div>
+                                                <div className="text-sm font-medium whitespace-nowrap">
+                                                  {formatCurrency(product.total)}
+                                                </div>
+                                              </div>
+                                              <div className="text-[13px] text-gray-500 mt-0.5">
+                                                Qty: {product.quantity}, Weight: {product.weight}
+                                              </div>
+                                              <div className="text-[13px] text-gray-500 mt-0.5">
+                                                Unit Price: {formatCurrency(product.price)}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+
+                          <div className="flex justify-center mt-6">
+                            <div className="flex gap-1">
+                              {Array.from({ length: getPaginatedOrders(orders).totalPages }, (_, i) => (
+                                <Button
+                                  key={i + 1}
+                                  variant={currentPage === i + 1 ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => setCurrentPage(i + 1)}
+                                  className="w-8 h-8 p-0"
+                                >
+                                  {i + 1}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </TabsContent>
                 </div>
               </Tabs>
-
-              {error && (
-                <Alert variant="destructive" className="mt-4">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
             </CardContent>
           </Card>
         </motion.div>
+
+        {error && (
+          <Alert variant="destructive" className="mt-4">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
       </div>
       <Footer />
 
-      {/* OTP Verification Dialog */}
+      <Dialog open={orderDetailsOpen} onOpenChange={setOrderDetailsOpen}>
+        <DialogContent className="w-[95%] max-w-[1000px] h-[90vh] md:h-[500px] flex flex-col overflow-hidden">
+          {/* Status Banner */}
+          <div className={cn(
+            "shrink-0 border-b",
+            selectedOrder?.payment_status === 'SUCCESS' ? 'bg-emerald-50' :
+            selectedOrder?.payment_status === 'FAILED' ? 'bg-red-50' :
+            selectedOrder?.payment_status === 'EXPIRED' ? 'bg-gray-50' :
+            'bg-amber-50'
+          )}>
+            <div className="p-4">
+              <h2 className="text-lg font-semibold">Order #{selectedOrder?.orderid}</h2>
+              <p className={cn(
+                "text-sm font-medium mt-1",
+                selectedOrder?.payment_status === 'SUCCESS' ? 'text-emerald-600' :
+                selectedOrder?.payment_status === 'FAILED' ? 'text-red-600' :
+                selectedOrder?.payment_status === 'EXPIRED' ? 'text-gray-600' :
+                'text-amber-600'
+              )}>
+                {selectedOrder?.payment_status === 'SUCCESS' ? 'Payment Successful' :
+                 selectedOrder?.payment_status === 'FAILED' ? 'Payment Failed' :
+                 selectedOrder?.payment_status === 'EXPIRED' ? 'Order Expired' :
+                 'Payment Pending'}
+              </p>
+            </div>
+          </div>
+
+          {/* Scrollable Content */}
+          <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400">
+            <div className="p-4 space-y-6">
+              {/* Order Info Grid - Responsive layout */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Customer Details */}
+                <div>
+                  <h3 className="text-sm font-medium mb-3">Ordered By</h3>
+                  <div className="bg-gray-50 p-4 rounded-lg border">
+                    <div className="space-y-2 text-sm">
+                      <p>{selectedOrder?.user?.firstname} {selectedOrder?.user?.lastname}</p>
+                      <p className="text-gray-500">Email: {selectedOrder?.user?.emailid}</p>
+                      <p className="text-gray-500">Mobile: {selectedOrder?.user?.mobilenum}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Delivery Address */}
+                <div>
+                  <h3 className="text-sm font-medium mb-3">Delivery Address</h3>
+                  <div className="bg-gray-50 p-4 rounded-lg border">
+                    {orderAddress ? (
+                      <div className="space-y-2 text-sm">
+                        <p>{orderAddress.firstName} {orderAddress.lastName}</p>
+                        <p className="text-gray-500">{orderAddress.streetAddress}</p>
+                        <p className="text-gray-500">{orderAddress.city}, {orderAddress.state} {orderAddress.pinCode}</p>
+                        <p className="text-gray-500">Phone: {orderAddress.mobileNumber}</p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">No address available</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Order Summary */}
+                <div>
+                  <h3 className="text-sm font-medium mb-3">Order Summary</h3>
+                  <div className="bg-gray-50 p-4 rounded-lg border">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Subtotal</span>
+                        <span>₹{(selectedOrder?.subtotal || 0).toFixed(2)}</span>
+                      </div>
+                      {selectedOrder?.containerCharges > 0 && (
+                        <div className="flex justify-between text-sm">
+                          <span>Container Charges</span>
+                          <span>₹{(selectedOrder?.containerCharges || 0).toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-sm">
+                        <span>Shipping</span>
+                        <span>₹{(selectedOrder?.shippingCharges || 0).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span>GST ({selectedOrder?.gstPercentage || 0}%)</span>
+                        <span>₹{(selectedOrder?.gstAmount || 0).toFixed(2)}</span>
+                      </div>
+                      <div className="border-t pt-2 flex justify-between font-bold">
+                        <span>Total</span>
+                        <span>₹{(selectedOrder?.total || 0).toFixed(2)}</span>
+                      </div>
+                      <div className="pt-2 mt-2 border-t space-y-1">
+                        <p className="text-xs text-gray-500">Payment ID: {selectedOrder?.razorpayPaymentId || 'Not available'}</p>
+                        <p className="text-xs text-gray-500">Order ID: {selectedOrder?.razorpayOrderId || 'Not available'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Products List */}
+              <div>
+                <h3 className="text-sm font-medium mb-3">Products</h3>
+                <div className="bg-gray-50 rounded-lg border divide-y">
+                  {orderProducts.map((product, index) => (
+                    <div key={index} className="flex items-center gap-4 p-4">
+                      <img
+                        src={product.product_image}
+                        alt={product.product_name}
+                        className="w-16 h-16 object-cover rounded-md border"
+                        onError={(e) => e.target.src = '/placeholder.png'}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-medium">{product.product_name}</h4>
+                        <p className="text-sm text-gray-500">
+                          {product.quantity}x {product.weight}g
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          Unit Price: {formatCurrency(product.unitPrice)}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-medium">{formatCurrency(product.totalPrice)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Order Timeline - New Section */}
+              <div className="mt-6 space-y-4">
+                <div className="space-y-2">
+                  <h3 className="font-medium">Order Timeline</h3>
+                  <div className="text-sm text-muted-foreground space-y-1">
+                    <div className="flex justify-between">
+                      <span>Created:</span>
+                      <span>{selectedOrder?.createdTime ? format(new Date(selectedOrder.createdTime), 'PPpp') : 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Last Updated:</span>
+                      <span>{selectedOrder?.payment_status === 'SUCCESS' ? format(new Date(selectedOrder.createdTime), 'PPpp') : 'N/A'}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Print Invoice Button - Only show for successful payments */}
+          {selectedOrder && selectedOrder.payment_status === 'SUCCESS' && (
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="flex items-center gap-2 mt-4"
+              onClick={() => {
+                setOrderDetailsOpen(false);
+                const printWindow = window.open('', '_blank');
+                if (printWindow) {
+                  printWindow.document.write(`
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <title>Print Invoice - ${selectedOrder.orderid}</title>
+                        <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+                        <style>
+                          @page {
+                            size: A4;
+                            margin: 0;
+                          }
+                          body { 
+                            background-color: #FBF6EE;
+                          }
+                          @media print {
+                            body { 
+                              -webkit-print-color-adjust: exact;
+                              print-color-adjust: exact;
+                            }
+                            .print-content {
+                              padding: 0;
+                              margin: 0;
+                            }
+                          }
+                        </style>
+                      </head>
+                      <body>
+                        <div id="print-root" class="print-content"></div>
+                      </body>
+                    </html>
+                  `);
+                  
+                  const printRoot = printWindow.document.getElementById('print-root');
+                  if (printRoot) {
+                    const root = createRoot(printRoot);
+                    root.render(
+                      <OrderInvoice 
+                        order={selectedOrder} 
+                        products={orderProducts} 
+                        address={orderAddress}
+                      />
+                    );
+                    
+                    setTimeout(() => {
+                      printWindow.print();
+                      printWindow.close();
+                    }, 1000);
+                  }
+                }
+              }}
+            >
+              <Printer className="h-4 w-4" />
+              Print Invoice
+            </Button>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={otpDialogOpen} onOpenChange={setOtpDialogOpen}>
         <DialogContent className="w-[90%] max-w-[425px] p-4 sm:p-6">
           <DialogHeader className="space-y-3">
-            {/* <DialogTitle className="text-xl sm:text-2xl text-center">OTP Verification</DialogTitle>
-            <DialogDescription className="text-center text-sm sm:text-base">
-              Enter the OTP sent to your email to update your profile.
-            </DialogDescription> */}
+            <DialogTitle>Verify OTP</DialogTitle>
+            <DialogDescription>
+              Please enter the 6-digit code sent to your email to update your profile.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="flex flex-col space-y-4">
               <Label className="text-center">Enter OTP</Label>
-              <p className="text-sm text-muted-foreground text-center px-2">
-                Please enter the 6-digit code sent to your email
-              </p>
               <InputOTP
                 maxLength={6}
                 value={otp}
@@ -360,9 +1544,9 @@ export default function Profile() {
                   <InputOTPGroup className="gap-2 sm:gap-3 justify-center max-w-[280px] mx-auto">
                     {slots.map((slot, index) => (
                       <React.Fragment key={index}>
-                        <InputOTPSlot 
-                          className="rounded-md border w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-center" 
-                          {...slot} 
+                        <InputOTPSlot
+                          {...slot}
+                          className="w-10 h-10 sm:w-12 sm:h-12 text-center text-xl rounded-md border"
                         />
                       </React.Fragment>
                     ))}
@@ -371,11 +1555,189 @@ export default function Profile() {
               />
             </div>
           </div>
-          <Button onClick={handleUpdateProfile} disabled={loading || otp.length < 6}>
-            Verify OTP and Update
-          </Button>
+          <div className="flex justify-end space-x-2 sticky bottom-0 bg-background pt-3 mt-3 border-t">
+            <Button variant="ghost" onClick={() => setOtpDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateProfile}>
+              Verify and Update
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={addressDialogOpen} onOpenChange={setAddressDialogOpen}>
+        <DialogContent className="w-[95%] max-w-[1000px] h-[90vh] md:h-[500px] flex flex-col overflow-hidden">
+          <DialogHeader className="space-y-3">
+            <DialogTitle>{editingAddress ? 'Edit Address' : 'Add New Address'}</DialogTitle>
+            <DialogDescription>
+              {editingAddress ? 'Update your delivery address details below.' : 'Enter your delivery address details below.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid sm:grid-cols-2 gap-6 py-3">
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="firstName" className="text-sm">First Name <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="firstName"
+                    value={addressFormData.firstName}
+                    onChange={handleAddressInputChange}
+                    placeholder="First Name"
+                    className={`mt-1 h-9 ${fieldErrors.firstName && touched.firstName ? 'border-red-500' : ''}`}
+                    required
+                  />
+                  {fieldErrors.firstName && touched.firstName && (
+                    <p className="text-xs text-red-500 mt-1">{fieldErrors.firstName}</p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="lastName" className="text-sm">Last Name (Optional)</Label>
+                  <Input
+                    id="lastName"
+                    value={addressFormData.lastName}
+                    onChange={handleAddressInputChange}
+                    placeholder="Last Name (Optional)"
+                    className={`mt-1 h-9 ${fieldErrors.lastName && touched.lastName ? 'border-red-500' : ''}`}
+                  />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="email" className="text-sm">Email <span className="text-red-500">*</span></Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={addressFormData.email}
+                  onChange={handleAddressInputChange}
+                  placeholder="Email"
+                  className={`mt-1 h-9 ${fieldErrors.email && touched.email ? 'border-red-500' : ''}`}
+                  required
+                />
+                {fieldErrors.email && touched.email && (
+                  <p className="text-xs text-red-500 mt-1">{fieldErrors.email}</p>
+                )}
+              </div>
+              <div>
+                <Label htmlFor="mobileNumber" className="text-sm">Mobile Number <span className="text-red-500">*</span></Label>
+                <Input
+                  id="mobileNumber"
+                  value={addressFormData.mobileNumber}
+                  onChange={handleAddressInputChange}
+                  placeholder="Mobile Number"
+                  maxLength={10}
+                  className={`mt-1 h-9 ${fieldErrors.mobileNumber && touched.mobileNumber ? 'border-red-500' : ''}`}
+                  required
+                />
+                {fieldErrors.mobileNumber && touched.mobileNumber && (
+                  <p className="text-xs text-red-500 mt-1">{fieldErrors.mobileNumber}</p>
+                )}
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <Label htmlFor="streetAddress" className="text-sm">Street Address <span className="text-red-500">*</span></Label>
+                <Textarea
+                  id="streetAddress"
+                  value={addressFormData.streetAddress}
+                  onChange={handleAddressInputChange}
+                  placeholder="Enter your street address"
+                  className={`mt-1 resize-none h-20 ${fieldErrors.streetAddress && touched.streetAddress ? 'border-red-500' : ''}`}
+                  required
+                />
+                {fieldErrors.streetAddress && touched.streetAddress && (
+                  <p className="text-xs text-red-500 mt-1">{fieldErrors.streetAddress}</p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="pinCode" className="text-sm">PIN Code <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="pinCode"
+                    value={addressFormData.pinCode}
+                    onChange={handleAddressInputChange}
+                    placeholder="PIN Code"
+                    maxLength={6}
+                    className={`mt-1 h-9 ${fieldErrors.pinCode && touched.pinCode ? 'border-red-500' : ''}`}
+                    required
+                  />
+                  {fieldErrors.pinCode && touched.pinCode && (
+                    <p className="text-xs text-red-500 mt-1">{fieldErrors.pinCode}</p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="city" className="text-sm">City <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="city"
+                    value={addressFormData.city}
+                    onChange={handleAddressInputChange}
+                    placeholder="City"
+                    className={`mt-1 h-9 ${fieldErrors.city && touched.city ? 'border-red-500' : ''}`}
+                    required
+                  />
+                  {fieldErrors.city && touched.city && (
+                    <p className="text-xs text-red-500 mt-1">{fieldErrors.city}</p>
+                  )}
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="state" className="text-sm">State <span className="text-red-500">*</span></Label>
+                <Input
+                  id="state"
+                  value={addressFormData.state}
+                  onChange={handleAddressInputChange}
+                  placeholder="State"
+                  className={`mt-1 h-9 ${fieldErrors.state && touched.state ? 'border-red-500' : ''}`}
+                  required
+                />
+                {fieldErrors.state && touched.state && (
+                  <p className="text-xs text-red-500 mt-1">{fieldErrors.state}</p>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end space-x-2 sticky bottom-0 bg-background pt-3 mt-3 border-t">
+            <Button variant="ghost" onClick={() => {
+              setAddressDialogOpen(false);
+              setEditingAddress(null);
+              resetAddressForm();
+            }}>
+              Cancel
+            </Button>
+            <Button onClick={editingAddress ? handleUpdateAddress : handleAddAddress}>
+              {editingAddress ? 'Update' : 'Add'} Address
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Address</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this address? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setDeleteDialogOpen(false);
+              setAddressToDelete(null);
+            }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteAddress}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Toaster />
     </div>
   );
 }
+
+export default Profile;

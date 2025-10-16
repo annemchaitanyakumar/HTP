@@ -1,103 +1,89 @@
-import { forwardRef, memo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ShoppingCart, Plus, Minus } from 'lucide-react';
+import { forwardRef, memo, useState } from 'react';
+import { motion } from 'framer-motion';
+import { ShoppingCart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCartStore } from '@/store/cartStore';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import { useToast } from '@/hooks/use-toast';
 import PropTypes from 'prop-types';
+import { cn } from '@/lib/utils';
 
-// Helper to get main price and weight
-const getMainPrice = (product) => {
-  let priceByWeight = product.price_by_weight;
-  if (typeof priceByWeight === 'string') {
-    try {
-      priceByWeight = JSON.parse(priceByWeight);
-    } catch {
-      priceByWeight = {};
-    }
-  }
-  if (priceByWeight['500'] > 0) return { price: priceByWeight['500'], weight: 500 };
-  if (priceByWeight['1000'] > 0) return { price: priceByWeight['1000'], weight: 1000 };
-  const available = Object.entries(priceByWeight)
-    .filter(([w, p]) => Number(p) > 0)
-    .sort((a, b) => Number(b[0]) - Number(a[0]));
-  if (available.length > 0) {
-    return { price: available[0][1], weight: available[0][0] };
-  }
-  return { price: 0, weight: null };
+const getProductPrices = (product) => {
+  const variants = Array.isArray(product.variants) ? product.variants : [];
+  const availableVariants = variants.filter(v => Number(v.stock) > 0);
+  
+  if (availableVariants.length === 0) return { inStock: false, minPrice: 0, maxPrice: 0, variants: [] };
+  
+  const prices = availableVariants.map(v => v.price);
+  return {
+    inStock: true,
+    minPrice: Math.min(...prices),
+    maxPrice: Math.max(...prices),
+    variants: availableVariants,
+    totalStock: availableVariants.reduce((a, v) => a + v.stock, 0)
+  };
 };
 
 export const SearchResults = memo(
   forwardRef(({ results, onClose }, ref) => {
-    const { addItem, incrementQuantity, decrementQuantity, items } = useCartStore();
+    const { addItem } = useCartStore();
+    const { toast } = useToast();
     const navigate = useNavigate();
 
-    const getItemQuantity = (productId) => {
-      const item = items.find((item) => item.productId === productId);
-      return item ? item.quantity : 0;
+    const [selectedVariants, setSelectedVariants] = useState({});
+    const [addToCartLoading, setAddToCartLoading] = useState({});
+
+    const handleVariantSelect = (e, productId, variant) => {
+      e.stopPropagation();
+      e.preventDefault();
+      setSelectedVariants(prev => {
+        if (prev[productId]?.variant_id === variant.variant_id) return { ...prev, [productId]: undefined };
+        return { ...prev, [productId]: variant };
+      });
     };
 
     const handleAddToCart = async (e, product) => {
       e.stopPropagation();
       e.preventDefault();
-      try {
-        const { price, weight } = getMainPrice(product);
+      
+      const selectedVariant = selectedVariants[product.id] || 
+        (product.variants && product.variants.find(v => Number(v.stock) > 0));
         
-        // Debug the values before sending
-        console.log('Adding product:', {
-          id: product.id,
-          name: product.product_name,
-          price,
-          weight,
-          category: product.category
+      if (!selectedVariant) {
+        toast({ 
+          variant: 'destructive', 
+          title: 'Error', 
+          description: 'Please select a variant or product is out of stock' 
         });
+        return;
+      }
 
-        if (!product.id) {
-          console.error('Product ID is missing:', product);
-          return;
-        }
-
+      setAddToCartLoading(prev => ({ ...prev, [product.id]: true }));
+      try {
         await addItem({
           id: product.id,
-          product_name: product.product_name,
-          price_by_weight: { [weight]: price },
-          category: product.category,
-          product_image1_url: product.product_image1_url || '/placeholder.png',
-          slug: product.slug || product.product_name.toLowerCase().replace(/\s+/g, '-'),
-          quantity: 1,
-          weight: weight
+          name: product.product_name,
+          price: selectedVariant.price,
+          product_image1_url: product.product_image1_url,
+          selectedVariant
         });
-      } catch (error) {
-        console.error('Error adding item to cart:', error);
-      }
-    };
-
-    const handleIncrement = async (e, productId) => {
-      e.stopPropagation();
-      e.preventDefault();
-      const item = items.find(item => item.productId === productId);
-      if (item) {
-        await incrementQuantity(item.cartId);
-      }
-    };
-
-    const handleDecrement = async (e, productId) => {
-      e.stopPropagation();
-      e.preventDefault();
-      const item = items.find(item => item.productId === productId);
-      if (item) {
-        await decrementQuantity(item.cartId);
+        toast({ title: 'Success', description: `${product.product_name} (${selectedVariant.weight}g) added to cart.` });
+      } catch (err) {
+        console.error('Add to cart error', err);
+        toast({ variant: 'destructive', title: 'Error', description: 'Failed to add to cart' });
+      } finally {
+        setAddToCartLoading(prev => ({ ...prev, [product.id]: false }));
       }
     };
 
     const handleProductClick = (e, product) => {
       e.preventDefault();
       onClose();
-      const slug = product.slug || product.product_name.toLowerCase().replace(/\s+/g, '-');
+      const slug = product.product_name.toLowerCase().replace(/\s+/g, '-');
       navigate(`/products/${slug}`);
     };
 
-    if (results.length === 0) return null;
+    if (!results.length) return null;
 
     return (
       <motion.div
@@ -109,15 +95,14 @@ export const SearchResults = memo(
       >
         <div className="space-y-2">
           {results.map((product) => {
-            const { price, weight } = getMainPrice(product);
+            const priceInfo = getProductPrices(product);
             return (
               <div
                 key={product.id}
-                className="flex items-center gap-4 p-3 hover:bg-muted/50 transition-colors"
+                className="flex flex-col p-3 hover:bg-muted/50 transition-colors"
               >
-                {/* Clickable area for navigation */}
                 <div
-                  className="flex items-center gap-4 flex-1 cursor-pointer group"
+                  className="flex items-center gap-4 cursor-pointer group"
                   onClick={(e) => handleProductClick(e, product)}
                 >
                   <img
@@ -125,63 +110,52 @@ export const SearchResults = memo(
                     alt={product.product_name}
                     className="w-16 h-16 object-cover rounded-md hover:opacity-75 transition-opacity"
                     onError={(e) => {
-                      console.error('Image failed to load:', product.id, e.target.src);
                       e.target.src = '/placeholder.png';
                       e.target.onerror = null;
                     }}
                   />
                   <div className="flex-1 min-w-0">
                     <h4 className="font-medium text-sm group-hover:text-primary transition-colors">{product.product_name}</h4>
-                    <p className="text-primary text-base font-semibold">
-                      ₹{price}
-                      {weight && (
-                        <span className="text-xs text-gray-500"> / {weight}g</span>
-                      )}
-                    </p>
-                    <p className="text-muted-foreground text-xs line-clamp-2 mt-1">
-                      {product.product_description}
-                    </p>
+                    {priceInfo.inStock ? (
+                      <div className="mt-1">
+                        <p className="text-primary text-sm font-semibold">
+                          From ₹{priceInfo.minPrice} — ₹{priceInfo.maxPrice}
+                        </p>
+                        <p className="text-xs text-green-600">In Stock ({priceInfo.totalStock} available)</p>
+                      </div>
+                    ) : (
+                      <p className="text-red-600 text-sm font-semibold mt-1">Sold Out</p>
+                    )}
                   </div>
                 </div>
-                {/* Add to cart controls */}
-                <div className="flex items-center gap-2 pr-2">
-                  {getItemQuantity(product.id) > 0 ? (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-7 w-7 border-secondary/20 hover:bg-secondary/10 hover:text-secondary transition-colors"
-                        onClick={(e) => handleDecrement(e, product.id)}
-                        aria-label={`Decrease quantity of ${product.product_name}`}
-                      >
-                        <Minus className="h-3 w-3" />
-                      </Button>
-                      <span className="w-8 text-center text-sm font-medium">
-                        {getItemQuantity(product.id)}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-7 w-7 border-secondary/20 hover:bg-secondary/10 hover:text-secondary transition-colors"
-                        onClick={(e) => handleIncrement(e, product.id)}
-                        aria-label={`Increase quantity of ${product.product_name}`}
-                      >
-                        <Plus className="h-3 w-3" />
-                      </Button>
+
+                {priceInfo.inStock && (
+                  <div className="mt-2 pl-20">
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {priceInfo.variants.map(variant => (
+                        <Button
+                          key={variant.variant_id}
+                          variant={selectedVariants[product.id]?.variant_id === variant.variant_id ? 'default' : 'outline'}
+                          size="sm"
+                          className="text-xs h-6 px-2"
+                          onClick={(e) => handleVariantSelect(e, product.id, variant)}
+                        >
+                          {variant.weight}g - ₹{variant.price}
+                        </Button>
+                      ))}
                     </div>
-                  ) : (
                     <Button
                       size="sm"
                       variant="secondary"
-                      className="hover:bg-secondary/90 transition-colors"
+                      className="hover:bg-secondary/90 transition-colors h-7 text-xs w-full"
                       onClick={(e) => handleAddToCart(e, product)}
-                      aria-label={`Add ${product.product_name} to cart`}
+                      disabled={addToCartLoading[product.id]}
                     >
                       <ShoppingCart className="h-3 w-3 mr-1" />
-                      Add
+                      {addToCartLoading[product.id] ? 'Adding...' : 'Add to Cart'}
                     </Button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -194,16 +168,18 @@ export const SearchResults = memo(
 SearchResults.propTypes = {
   results: PropTypes.arrayOf(
     PropTypes.shape({
-      id: PropTypes.string.isRequired,
+      id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
       product_name: PropTypes.string.isRequired,
-      product_price: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
-      price_by_weight: PropTypes.oneOfType([PropTypes.object, PropTypes.string]),
       product_image1_url: PropTypes.string,
-      product_description: PropTypes.string.isRequired,
-      category: PropTypes.string.isRequired,
+      variants: PropTypes.arrayOf(
+        PropTypes.shape({
+          variant_id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+          weight: PropTypes.number.isRequired,
+          price: PropTypes.number.isRequired,
+          stock: PropTypes.number.isRequired
+        })
+      )
     })
   ).isRequired,
-  onClose: PropTypes.func.isRequired,
+  onClose: PropTypes.func.isRequired
 };
-
-SearchResults.displayName = 'SearchResults';

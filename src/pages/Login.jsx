@@ -271,6 +271,7 @@ export default function Login() {
                 <p className="text-muted-foreground text-lg">
                   Join our community and discover the authentic taste of homemade pickles.
                 </p>
+                <br />
                 <Link to="/signup">
                   <Button 
                     size="lg"

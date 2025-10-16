@@ -1,281 +1,330 @@
+// src/pages/Products.jsx
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { productService } from '@/services/productService';
 import { useToast } from '@/hooks/use-toast';
 import { Navbar } from '@/components/Navbar';
 import { useCartStore } from '@/store/cartStore';
 import { useProductStore } from '@/store/productStore';
-import axios, { imageInstance } from '@/lib/axios';
+import axios from '@/lib/axios';
 import { useAuth } from '@/context/AuthContext';
+import { cn } from '@/lib/utils';
+import { SlidersHorizontal, Search } from 'lucide-react';
+import { Slider } from '@/components/ui/slider';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { SearchBar } from '@/components/SearchBar';
+
+const DJANGO_PRESIGN_ENDPOINT = 'http://localhost:8000/api/products'; // /{id}/presigned-urls
+
+const slugify = (name = '') =>
+  name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
 export default function Products() {
-  const [selectedWeights, setSelectedWeights] = useState({});
+  const PAGE_SIZE = 12;
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState('all'); // 'all' | 'VEG' | 'NONVEG' | 'price'
+  const [currentPage, setCurrentPage] = useState(1); // 1-based for UI
+  const [totalCount, setTotalCount] = useState(0);
   const { toast } = useToast();
   const { addItem } = useCartStore();
   const { user } = useAuth ? useAuth() : { user: null };
   const setGlobalProducts = useProductStore(state => state.setProducts);
-  const [urlExpiryTimes, setUrlExpiryTimes] = useState({});
   const [isHovered, setIsHovered] = useState({});
-  const REFRESH_BUFFER = 300; // Refresh 5 minutes before expiry
   const [currentImageIndices, setCurrentImageIndices] = useState({});
   const [addToCartLoading, setAddToCartLoading] = useState({});
+  const [minPriceInput, setMinPriceInput] = useState('0');
+  const [maxPriceInput, setMaxPriceInput] = useState('5000');
+  const [appliedPriceRange, setAppliedPriceRange] = useState(null);
+  const [selectedWeights, setSelectedWeights] = useState({});
+
+
+  // Price filter handlers
+  const handlePriceChange = (value) => {
+    // Sort the values to ensure min is always less than max
+    const [min, max] = value.sort((a, b) => a - b);
+    setMinPriceInput(min.toString());
+    setMaxPriceInput(max.toString());
+  };
+
+  const handlePriceFilter = () => {
+    const min = Number(minPriceInput);
+    const max = Number(maxPriceInput);
+    if (isNaN(min) || isNaN(max)) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid price range',
+        description: 'Please enter valid numbers for the price range'
+      });
+      return;
+    }
+    setAppliedPriceRange({ min, max });
+    setFilter('price');
+  };
+
+  useEffect(() => { setCurrentPage(1); }, [filter, appliedPriceRange]);
 
   useEffect(() => {
     fetchProducts();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, appliedPriceRange, currentPage]);
 
-  const fetchProducts = async () => {
+  // --- Normalizers ---
+  const normalizeVariant = (v) => ({
+    variant_id: v.variantId ?? v.variant_id ?? v.id ?? null,
+    weight: Number(v.weight ?? 0),
+    unit: v.unit ?? 'g',
+    price: Number(v.price ?? 0),
+    stock: Number(v.stock ?? 0),
+    raw: v
+  });
+
+  const normalizeProductShape = (raw) => {
+    // accept multiple shapes returned by different endpoints
+    const id = raw.productId ?? raw.id ?? raw.product_id ?? raw.product_id ?? null;
+    const name = raw.productName ?? raw.product_name ?? raw.product_title ?? raw.productTitle ?? raw.product_name ?? '';
+    const desc = raw.productDescription ?? raw.product_description ?? raw.productDescription ?? '';
+    const category = raw.category ?? raw.product_category ?? 'VEG';
+
+    // prefer full presigned url fields if backend provided them,
+    // else prefer productImage1 (relative key) that we may presign later
+    const image1 = raw.product_image1_url ?? raw.productImage1 ?? raw.product_image1 ?? raw.productImage1Url ?? null;
+    const image2 = raw.product_image2_url ?? raw.productImage2 ?? raw.product_image2 ?? raw.productImage2Url ?? null;
+    const image3 = raw.product_image3_url ?? raw.productImage3 ?? raw.product_image3 ?? raw.productImage3Url ?? null;
+
+    const variantsRaw = Array.isArray(raw.variants) ? raw.variants : (raw.variants ?? []);
+    const variants = variantsRaw.map(normalizeVariant);
+
+    return {
+      raw,
+      id,
+      product_name: name,
+      product_description: desc,
+      category,
+      // these may be full HTTP URLs or relative keys (S3 object keys) depending on endpoint
+      product_image1_url: image1,
+      product_image2_url: image2,
+      product_image3_url: image3,
+      variants
+    };
+  };
+
+  // fetch presigned urls from Django for a single product ID
+  const fetchPresignedUrls = async (productId) => {
+    const url = `${DJANGO_PRESIGN_ENDPOINT}/${productId}/presigned-urls`;
     try {
-      const response = await productService.getAllProducts();
-      console.log('Products data:', response);
-      
-      // Debug log to check if slugs are being added correctly
-      const sampleProduct = response[0];
-      console.log('Sample product with slug:', {
-        id: sampleProduct.id,
-        name: sampleProduct.product_name,
-        slug: sampleProduct.slug
+      const response = await fetch(url, {
+        method: 'GET',
+        mode: 'cors',
+        credentials: 'omit',
       });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return {
+        product_image1_url: data.product_image1_url ?? data.image1_url ?? data[0] ?? null,
+        product_image2_url: data.product_image2_url ?? data.image2_url ?? data[1] ?? null,
+        product_image3_url: data.product_image3_url ?? data.image3_url ?? data[2] ?? null,
+      };
+    } catch (err) {
+      // don't fail whole UI if presign fails
+      console.debug('presign fetch failed for', productId, err?.message ?? err);
+      return { product_image1_url: null, product_image2_url: null, product_image3_url: null };
+    }
+  };
 
-      // Debug log for product details
-      console.log('Raw product data from API:', response.map(p => ({
-        id: p.id,
-        name: p.product_name,
-        price: p.product_price,
-        images: p.product_image1
-      })));
+  // Ensure each product has usable full URLs for images. If backend returned full URLs keep them,
+  // otherwise call presign endpoint which should return full s3 presigned urls (or fallback placeholder).
+  const ensureImageUrlsForList = async (normalizedList) => {
+    // find only those that do not have an http url for image1
+    const needPresign = normalizedList.filter(p => !(typeof p.product_image1_url === 'string' && p.product_image1_url.startsWith('http')));
 
-      const productsWithPresignedUrls = await Promise.all(
-        response.map(async (product) => {
-          try {
-            const presignedUrlsResponse = await fetchPresignedUrls(product.id);
-            
-            // Log each product's data transformation
-            console.log('Product transformation:', {
-              before: {
-                id: product.id,
-                price: product.product_price,
-                image: product.product_image1
-              },
-              after: {
-                id: product.id,
-                price: product.product_price,
-                image1: presignedUrlsResponse.product_image1_url
-              }
-            });
+    if (!needPresign.length) return normalizedList;
 
-            const updatedProduct = {
-              ...product,
-              product_image1_url: presignedUrlsResponse.product_image1_url,
-              product_image2_url: presignedUrlsResponse.product_image2_url,
-              product_image3_url: presignedUrlsResponse.product_image3_url,
-              product_image4_url: presignedUrlsResponse.product_image4_url,
-              product_image5_url: presignedUrlsResponse.product_image5_url,
-            };
-            
-            // Debug log
-            console.log('Updated product with URLs:', {
-              id: updatedProduct.id,
-              name: updatedProduct.product_name,
-              image1: updatedProduct.product_image1_url
-            });
-            
-            return updatedProduct;
-          } catch (error) {
-            console.error(`Error fetching presigned URLs for product ${product.id}:`, error);
-            return product;
-          }
-        })
-      );
+    const presignPromises = needPresign.map(p => fetchPresignedUrls(p.id));
+    const settled = await Promise.allSettled(presignPromises);
 
-      setProducts(productsWithPresignedUrls);
-      setGlobalProducts(productsWithPresignedUrls);
-      setCurrentImageIndices(
-        productsWithPresignedUrls.reduce((acc, product) => ({
-          ...acc,
-          [product.id]: 0,
-        }), {})
-      );
-    } catch (error) {
-      console.error('Error fetching products:', error);
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to fetch products"
+    const idToUrls = {};
+    settled.forEach((res, idx) => {
+      const pid = needPresign[idx].id;
+      idToUrls[pid] = res.status === 'fulfilled' ? res.value : { product_image1_url: null, product_image2_url: null, product_image3_url: null };
+    });
+
+    return normalizedList.map(p => {
+      // if backend already returned full http url, leave as is
+      if (typeof p.product_image1_url === 'string' && p.product_image1_url.startsWith('http')) return p;
+      const urls = idToUrls[p.id] || {};
+      return {
+        ...p,
+        product_image1_url: urls.product_image1_url ?? (p.product_image1_url ? `/${p.product_image1_url}` : '/placeholder.png'),
+        product_image2_url: urls.product_image2_url ?? (p.product_image2_url ? `/${p.product_image2_url}` : '/placeholder.png'),
+        product_image3_url: urls.product_image3_url ?? (p.product_image3_url ? `/${p.product_image3_url}` : '/placeholder.png'),
+      };
+    });
+  };
+
+  // --- Fetch products (supports get-all, by-category, filter-by-price) ---
+  const fetchProducts = async () => {
+    setLoading(true);
+    try {
+      let url = 'http://localhost:4040/api/get-all-products';
+      let params = { page: currentPage, size: PAGE_SIZE }; // 1-based for get-all-products
+
+      if (filter === 'price' && appliedPriceRange) {
+        url = 'http://localhost:4040/api/filter-by-price';
+        params = { minPrice: appliedPriceRange.min, maxPrice: appliedPriceRange.max, page: currentPage - 1, size: PAGE_SIZE };
+      } else if (filter !== 'all') {
+        url = 'http://localhost:4040/api/by-category';
+        params = { category: filter, page: currentPage - 1, size: PAGE_SIZE };
+      }
+
+      const resp = await axios.get(url, { params });
+      const data = resp.data || {};
+
+      // backend might respond with different shapes: content, results, content.content, or array
+      const rawItems = data.results ?? data.content ?? data.items ?? data.content ?? data ?? [];
+      const arr = Array.isArray(rawItems) ? rawItems : (Array.isArray(rawItems.content) ? rawItems.content : []);
+
+      const normalized = arr.map(normalizeProductShape);
+
+      // Ensure images: if product_image1_url is relative or missing, call presign
+      const withUrls = await ensureImageUrlsForList(normalized);
+
+      const finalList = withUrls.map(p => ({
+        ...p,
+        product_image1_url: p.product_image1_url ?? '/placeholder.png',
+        product_image2_url: p.product_image2_url ?? '/placeholder.png',
+        product_image3_url: p.product_image3_url ?? '/placeholder.png',
+      }));
+
+      setProducts(finalList);
+      setGlobalProducts(finalList);
+      setTotalCount(data.count ?? data.totalElements ?? data.total ?? (finalList.length));
+
+      setCurrentImageIndices(prev => {
+        const copy = { ...prev };
+        finalList.forEach(prod => { if (copy[prod.id] === undefined) copy[prod.id] = 0; });
+        return copy;
       });
+    } catch (err) {
+      console.error('Error loading products', err);
+      toast({ variant: 'destructive', title: 'Error', description: 'Failed to load products' });
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchPresignedUrls = async (productId) => {
-    const presignedUrlsUrl = `http://localhost:8000/api/products/${productId}/presigned-urls/`;
-    try {
-      const response = await axios.get(presignedUrlsUrl);
-      const data = response.data;
-      console.log(`Presigned URLs for product ${productId}:`, data);
-      console.log('Response from presigned URLs:', data); // Debug log
-      return data;
-    } catch (error) {
-      console.error(`Failed to fetch presigned URLs for product ${productId}:`, error);
-      throw error;
-    }
-  };
-
-  const filteredProducts = products.filter(product => {
-    const matchesFilter = filter === 'all' || product.category === filter.toUpperCase();
-    return matchesFilter;
-  });
-
-  const handleWeightSelect = (productId, weight, price) => {
+  const handleWeightSelect = (productId, variant) => {
     setSelectedWeights(prev => {
-      if (prev[productId]?.weight === weight) {
-        return { ...prev, [productId]: undefined };
-      }
-      return { ...prev, [productId]: { weight, price } };
+      if (prev[productId]?.variant_id === variant.variant_id) return { ...prev, [productId]: undefined };
+      return { ...prev, [productId]: { ...variant } };
     });
   };
 
   const handleAddToCart = async (product) => {
-    const weightSelection = selectedWeights[product.id];
     if (!user) {
       toast({
-        variant: "destructive",
-        title: "Login required",
-        description: "Login first to add to cart",
+        title: "Please login",
+        description: "You need to be logged in to add items to cart",
+        variant: "destructive"
       });
       return;
     }
-    if (!weightSelection) {
+
+    const selectedVariant = selectedWeights[product.id];
+    if (!selectedVariant) {
       toast({
-        variant: "destructive",
-        title: "Please select weight",
-        description: "You need to select a weight before adding to cart",
+        title: "Select a size",
+        description: "Please select a size before adding to cart",
+        variant: "destructive"
       });
       return;
     }
+
     setAddToCartLoading(prev => ({ ...prev, [product.id]: true }));
+
     try {
-      await addItem({
-        ...product,
-        selectedWeight: weightSelection.weight,
-        selectedPrice: weightSelection.price,
-      });
+      const cartItem = {
+        id: product.id,
+        name: product.product_name,
+        price: Number(selectedVariant.price),
+        product_image1_url: product.product_image1_url || '/placeholder.png',
+        weight: Number(selectedVariant.weight),
+        quantity: 1
+      };
+
+      await addItem(cartItem);
+
+      // Fetch updated cart count from backend
+      try {
+        const response = await axios.get('/cart-count');
+        const count = response?.data ?? 0;
+        // Dispatch event to update cart badge
+        window.dispatchEvent(new CustomEvent('cart-count-updated', { detail: count }));
+      } catch (error) {
+        console.error('Failed to fetch cart count:', error);
+      }
+
       toast({
-        title: 'Added to cart',
-        description: `${product.product_name} (${weightSelection.weight}g) added to cart.`,
+        title: "Added to cart",
+        description: `${product.product_name} (${selectedVariant.weight}g) added to cart`,
       });
     } catch (error) {
+      console.error('Add to cart failed:', error);
       toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'Failed to add to cart',
+        title: "Error",
+        description: "Failed to add item to cart. Please try again.",
+        variant: "destructive"
       });
     } finally {
       setAddToCartLoading(prev => ({ ...prev, [product.id]: false }));
     }
   };
 
-  const getMainPrice = (product) => {
-    let priceByWeight = product.price_by_weight;
-    if (typeof priceByWeight === 'string') {
-      try {
-        priceByWeight = JSON.parse(priceByWeight);
-      } catch {
-        priceByWeight = {};
-      }
+  const applyPriceFilter = () => {
+    const min = Number(minPriceInput);
+    const max = Number(maxPriceInput);
+    if (isNaN(min) || isNaN(max) || min < 0 || max < 0 || min > max) {
+      toast({ variant: 'destructive', title: 'Invalid price', description: 'Please enter a valid min and max price (min ≤ max).' });
+      return;
     }
-    if (priceByWeight['500'] > 0) return { price: priceByWeight['500'], weight: 500 };
-    if (priceByWeight['1000'] > 0) return { price: priceByWeight['1000'], weight: 1000 };
-    const available = Object.entries(priceByWeight)
-      .filter(([w, p]) => Number(p) > 0)
-      .sort((a, b) => Number(b[0]) - Number(a[0]));
-    if (available.length > 0) {
-      return { price: available[0][1], weight: available[0][0] };
-    }
-    return { price: 0, weight: null };
+    setAppliedPriceRange({ min, max });
+    setFilter('price');
+    setCurrentPage(1);
   };
 
-  const checkAndRefreshUrls = async () => {
-    const now = Date.now();
-    const productsToRefresh = products.filter(product => {
-      const expiryTime = urlExpiryTimes[product.id];
-      return !expiryTime || now >= (expiryTime - REFRESH_BUFFER * 1000);
-    });
-
-    if (productsToRefresh.length > 0) {
-      const updatedProducts = await Promise.all(
-        productsToRefresh.map(async (product) => {
-          try {
-            const presignedUrlsResponse = await fetchPresignedUrls(product.id);
-            setUrlExpiryTimes(prev => ({
-              ...prev,
-              [product.id]: Date.now() + 3600000
-            }));
-            return {
-              ...product,
-              product_image1_url: presignedUrlsResponse.image1_url,
-              product_image2_url: presignedUrlsResponse.image2_url,
-              product_image3_url: presignedUrlsResponse.image3_url,
-              product_image4_url: presignedUrlsResponse.image4_url,
-              product_image5_url: presignedUrlsResponse.image5_url,
-            };
-          } catch (error) {
-            console.error(`Error refreshing URLs for product ${product.id}:`, error);
-            return product;
-          }
-        })
-      );
-
-      setProducts(prevProducts => {
-        const productMap = new Map(prevProducts.map(p => [p.id, p]));
-        updatedProducts.forEach(p => productMap.set(p.id, p));
-        return Array.from(productMap.values());
-      });
-    }
+  const clearPriceFilter = () => {
+    setAppliedPriceRange(null);
+    setMinPriceInput('0');
+    setMaxPriceInput('5000');
+    setFilter('all');
+    setCurrentPage(1);
   };
 
-  // Auto-scroll images only for hovered product
+  // rotate image when hovered
   useEffect(() => {
-    const intervalId = setInterval(() => {
+    const id = setInterval(() => {
       setCurrentImageIndices(prev => {
-        const newIndices = { ...prev };
+        const copy = { ...prev };
         products.forEach(product => {
-          if (isHovered[product.id]) { // Only update if product is hovered
-            const images = [
-              product.product_image1_url,
-              product.product_image2_url,
-              product.product_image3_url,
-              product.product_image4_url,
-              product.product_image5_url
-            ].filter(url => url).length > 0
-              ? [
-                  product.product_image1_url,
-                  product.product_image2_url,
-                  product.product_image3_url,
-                  product.product_image4_url,
-                  product.product_image5_url
-                ].filter(url => url)
-              : ['/placeholder.png'];
-            const currentIndex = prev[product.id] || 0;
-            newIndices[product.id] = (currentIndex + 1) % images.length;
+          if (isHovered[product.id]) {
+            const images = [product.product_image1_url, product.product_image2_url, product.product_image3_url].filter(Boolean);
+            if (images.length) copy[product.id] = ((prev[product.id] || 0) + 1) % images.length;
           }
         });
-        return newIndices;
+        return copy;
       });
     }, 3000);
-    return () => clearInterval(intervalId);
+    return () => clearInterval(id);
   }, [products, isHovered]);
 
-  useEffect(() => {
-    const intervalId = setInterval(checkAndRefreshUrls, REFRESH_BUFFER * 1000);
-    return () => clearInterval(intervalId);
-  }, [products, urlExpiryTimes]);
+  const totalPages = Math.max(1, Math.ceil((totalCount || 0) / PAGE_SIZE));
 
   if (loading) {
     return (
@@ -288,338 +337,151 @@ export default function Products() {
   return (
     <div className="min-h-screen bg-gradient-warm">
       <Navbar />
-
-  <section className="pt-10 pb-16 px-3 sm:px-4">
+      <section className="pt-10 pb-16 px-3 sm:px-4">
         <div className="max-w-[1400px] mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-center mb-8 sm:mb-12"
-          >
-            <h1 className="text-4xl md:text-6xl font-bold mb-6">
-              Our <span className="gradient-primary bg-clip-text text-transparent">Products</span>
-            </h1>
-            <p className="text-xl font-bold max-w-2xl mx-auto" style={{ fontFamily: 'Pacifico, cursive' }}>
-              Discover our handcrafted collection of traditional Indian pickles,
-              made with authentic recipes and premium ingredients.
-            </p>
+          <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-8 sm:mb-12">
+            <h1 className="text-4xl md:text-6xl font-bold mb-6">Our <span className="gradient-primary bg-clip-text text-transparent">Products</span></h1>
+            <p className="text-xl font-bold max-w-2xl mx-auto">Discover our handcrafted collection of traditional Indian pickles, made with authentic recipes and premium ingredients.</p>
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="flex justify-center mb-12"
-          >
-            <div className="flex gap-2">
-              <Button
-                variant={filter === 'all' ? 'default' : 'outline'}
-                onClick={() => setFilter('all')}
-                className={filter === 'all' ? 'gradient-primary text-primary-foreground' : ''}
-              >
-                <span className="sm:hidden">All</span>
-                <span className="hidden sm:inline">All Products</span>
-              </Button>
-              <Button
-                variant={filter === 'VEG' ? 'default' : 'outline'}
-                onClick={() => setFilter('VEG')}
-                className={filter === 'VEG' ? 'gradient-primary text-primary-foreground' : ''}
-              >
-                <span className="sm:hidden">Veg</span>
-                <span className="hidden sm:inline">Vegetarian</span>
-              </Button>
-              <Button
-                variant={filter === 'NONVEG' ? 'default' : 'outline'}
-                onClick={() => setFilter('NONVEG')}
-                className={filter === 'NONVEG' ? 'gradient-primary text-primary-foreground' : ''}
-              >
-                <span className="sm:hidden">Non - Veg</span>
-                <span className="hidden sm:inline">Non-Vegetarian</span>
-              </Button>
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="flex flex-col gap-4 items-center mb-8">
+            <div className="flex gap-2 flex-wrap justify-center">
+              <Button variant={filter === 'all' ? 'default' : 'outline'} onClick={() => { setFilter('all'); setAppliedPriceRange(null); }} className="text-sm sm:text-base"><span className="sm:hidden">All</span><span className="hidden sm:inline">All Products</span></Button>
+              <Button variant={filter === 'VEG' ? 'default' : 'outline'} onClick={() => setFilter('VEG')} className="text-sm sm:text-base"><span className="sm:hidden">Veg</span><span className="hidden sm:inline">Vegetarian</span></Button>
+              <Button variant={filter === 'NONVEG' ? 'default' : 'outline'} onClick={() => setFilter('NONVEG')} className="text-sm sm:text-base"><span className="sm:hidden">Non-Veg</span><span className="hidden sm:inline">Non-Vegetarian</span></Button>
+              
+              
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant={filter === 'price' ? 'default' : 'outline'} className="gap-2 text-sm sm:text-base">
+                    <SlidersHorizontal className="h-4 w-4" />
+                    {filter === 'price' ? `₹${appliedPriceRange?.min || minPriceInput}` : <><span className="sm:hidden">Filter</span><span className="hidden sm:inline">Price Filter</span></>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80">
+                  <div className="p-4 space-y-4">
+                    <div>
+                      <div className="flex justify-between items-center">
+                        <label className="text-base font-medium">Price Range</label>
+                        <span className="text-sm">₹{minPriceInput} - ₹{maxPriceInput}</span>
+                      </div>
+                      <div className="my-6">
+                        <Slider
+                          min={0}
+                          max={5000}
+                          step={100}
+                          value={[Number(minPriceInput), Number(maxPriceInput)]}
+                          onValueChange={(values) => {
+                            setMinPriceInput(values[0].toString());
+                            setMaxPriceInput(values[1].toString());
+                          }}
+                          className="mb-2"
+                        />
+                        <div className="flex justify-between text-sm text-muted-foreground mt-1">
+                          <span>₹0</span>
+                          <span>₹5000</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex justify-between">
+                      <Button variant="outline" size="sm" className="w-[80px]" onClick={clearPriceFilter}>
+                        Reset
+                      </Button>
+                      <Button variant="default" size="sm" className="w-[80px]" onClick={() => { handlePriceFilter(); document.body.click(); }}>
+                        Apply
+                      </Button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              {/* Mobile Search */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="sm:hidden gap-2 text-sm">
+                    <Search className="h-4 w-4" />
+                    {/* <span>Search</span> */}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-0 sm:hidden">
+                  <div className="p-2">
+                    <SearchBar className="w-full" placeholder="Search products..." />
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
+
+            {filter === 'price' && appliedPriceRange && (
+              <div className="text-sm text-muted-foreground">Filtering by price: ₹{appliedPriceRange.min} — ₹{appliedPriceRange.max}</div>
+            )}
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.4 }}
-            className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-6"
-          >
-            {filteredProducts.map((product, index) => {
-              const images = [
-                product.product_image1_url,
-                product.product_image2_url,
-                product.product_image3_url,
-                product.product_image4_url,
-                product.product_image5_url
-              ].filter(url => url).length > 0
-                ? [
-                    product.product_image1_url,
-                    product.product_image2_url,
-                    product.product_image3_url,
-                    product.product_image4_url,
-                    product.product_image5_url
-                  ].filter(url => url)
-                : ['/placeholder.png'];
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-6">
+            {products.map((product, idx) => {
+              const images = [product.product_image1_url, product.product_image2_url, product.product_image3_url].filter(Boolean);
+              const imagesArr = images.length ? images : ['/placeholder.png'];
               const currentImageIndex = currentImageIndices[product.id] || 0;
+              const variants = Array.isArray(product.variants) ? product.variants : [];
+              const availableVariants = variants.filter(v => Number(v.stock) > 0);
+              const selected = selectedWeights[product.id];
+              const inStock = availableVariants.length > 0;
+              const slug = slugify(product.product_name);
 
               return (
-                <motion.div
-                  key={product.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: index * 0.1 }}
-                  className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300 max-w-md mx-auto w-full"
-                  onMouseEnter={() => setIsHovered(prev => ({ ...prev, [product.id]: true }))}
-                  onMouseLeave={() => {
-                    setIsHovered(prev => ({ ...prev, [product.id]: false }));
-                    setCurrentImageIndices(prev => ({ ...prev, [product.id]: 0 }));
-                  }}
-                >
-                  <div className="relative w-full h-52 xs:h-44 sm:h-48 group">
-                    <div 
-                      className="block w-full h-full"
-                      onTouchStart={(e) => {
-                        const touch = e.touches[0];
-                        e.currentTarget.dataset.touchStartX = touch.clientX;
-                      }}
-                      onTouchMove={(e) => {
-                        e.preventDefault(); // Prevent scrolling while swiping
-                      }}
-                      onTouchEnd={(e) => {
-                        const touchEndX = e.changedTouches[0].clientX;
-                        const touchStartX = parseFloat(e.currentTarget.dataset.touchStartX);
-                        const difference = touchEndX - touchStartX;
-                        
-                        if (Math.abs(difference) > 50) { // Minimum swipe distance
-                          if (difference > 0) {
-                            // Swipe right - show previous image
-                            setCurrentImageIndices(prev => ({
-                              ...prev,
-                              [product.id]: (currentImageIndex - 1 + images.length) % images.length
-                            }));
-                          } else {
-                            // Swipe left - show next image
-                            setCurrentImageIndices(prev => ({
-                              ...prev,
-                              [product.id]: (currentImageIndex + 1) % images.length
-                            }));
-                          }
-                        }
-                      }}
-                    >
-                      <Link to={`/products/${product.slug}`} onClick={(e) => {
-                        // Only navigate if it's a tap/click, not a swipe
-                        if (e.currentTarget.dataset.isSwipe) {
-                          e.preventDefault();
-                          delete e.currentTarget.dataset.isSwipe;
-                        }
-                      }}>
-                        <motion.img
-                          key={currentImageIndex}
-                          src={images[currentImageIndex]}
-                          alt={`${product.product_name} view ${currentImageIndex + 1}`}
-                          className="w-full h-full object-cover rounded"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          transition={{ duration: 0.4, ease: 'easeInOut' }}
-                          onError={(e) => {
-                            e.target.src = '/placeholder.png';
-                            e.target.onerror = null;
-                          }}
-                        />
-                      </Link>
-                    </div>
-                    {/* Arrow controls on hover */}
-                    {images.length > 1 && (
-                      <>
-                        <button
-                          className="absolute left-2 top-1/2 -translate-y-1/2 z-10 opacity-0 group-hover:opacity-100 transition-opacity p-0 bg-transparent border-none"
-                          style={{ outline: 'none' }}
-                          onClick={e => {
-                            e.stopPropagation();
-                            setCurrentImageIndices(prev => ({
-                              ...prev,
-                              [product.id]: (currentImageIndex - 1 + images.length) % images.length
-                            }));
-                          }}
-                          aria-label="Previous image"
-                        >
-                          <svg className="w-7 h-7 text-white drop-shadow-lg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-                          </svg>
-                        </button>
-                        <button
-                          className="absolute right-2 top-1/2 -translate-y-1/2 z-10 opacity-0 group-hover:opacity-100 transition-opacity p-0 bg-transparent border-none"
-                          style={{ outline: 'none' }}
-                          onClick={e => {
-                            e.stopPropagation();
-                            setCurrentImageIndices(prev => ({
-                              ...prev,
-                              [product.id]: (currentImageIndex + 1) % images.length
-                            }));
-                          }}
-                          aria-label="Next image"
-                        >
-                          <svg className="w-7 h-7 text-white drop-shadow-lg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                          </svg>
-                        </button>
-                        <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-2">
-                          {images.map((_, imgIndex) => (
-                            <div
-                              key={imgIndex}
-                              className={`w-2 h-2 rounded-full ${imgIndex === currentImageIndex ? 'bg-primary' : 'bg-gray-300'}`}
-                            />
-                          ))}
-                        </div>
-                      </>
-                    )}
+                <motion.div key={product.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: idx * 0.05 }} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300 max-w-md mx-auto w-full" onMouseEnter={() => setIsHovered(prev => ({ ...prev, [product.id]: true }))} onMouseLeave={() => setIsHovered(prev => ({ ...prev, [product.id]: false }))}>
+                  <div className="relative w-full h-52 sm:h-48">
+                    <Link to={`/products/${slug}`}>
+                      <img src={imagesArr[currentImageIndex % imagesArr.length]} alt={product.product_name} className="w-full h-full object-cover rounded" onError={(e) => { e.target.src = '/placeholder.png'; }} />
+                    </Link>
                     <div className="absolute top-2 right-2">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-medium ${
-                        product.category === 'VEG' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                      }`}>
-                        {product.category}
-                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-medium ${product.category === 'VEG' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{product.category}</span>
                     </div>
                   </div>
 
-                  <div className="p-2.5 sm:p-4">
-                    <Link to={`/products/${product.slug}`}>
-                      <h3 className="text-sm sm:text-base font-semibold mb-1 text-gray-800 hover:text-primary transition-colors line-clamp-2">{product.product_name}</h3>
-                    </Link>
+                  <div className="p-3">
+                    <Link to={`/products/${slug}`}><h3 className="text-sm sm:text-base font-semibold mb-1 text-gray-800 hover:text-primary">{product.product_name}</h3></Link>
 
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        {(() => {
-                          let priceByWeight = product.price_by_weight;
-                          if (typeof priceByWeight === 'string') {
-                            try {
-                              priceByWeight = JSON.parse(priceByWeight);
-                            } catch {
-                              priceByWeight = {};
-                            }
-                          }
-                          const weights = Object.keys(priceByWeight).filter(w => priceByWeight[w] > 0);
-                          const prices = weights.map(w => priceByWeight[w]);
-                          const minPrice = Math.min(...prices);
-                          const maxPrice = Math.max(...prices);
-                          const selected = selectedWeights[product.id];
-                          return (
-                            <div className="flex flex-col">
-                              {selected && selected.weight ? (
-                                <>
-                                  <span className="text-base sm:text-lg font-bold text-primary">
-                                    ₹{selected.price} <span className="text-black font-normal">/ {selected.weight}g</span>
-                                  </span>
-                                </>
-                              ) : (
-                                <span className="text-base sm:text-lg font-bold text-primary">
-                                  <span className="text-black font-normal">From</span> ₹{minPrice} - ₹{maxPrice}
-                                  
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
-
-                      {/* Weight selection visible on sm and up */}
-                      <div className="hidden sm:block">
-                        <label className="text-sm font-medium text-gray-700">Select Weight:</label>
-                        <div className="grid grid-cols-2 gap-2 mt-1">
-                          {Object.entries(
-                            typeof product.price_by_weight === 'string'
-                              ? JSON.parse(product.price_by_weight)
-                              : product.price_by_weight
-                          ).map(([weight, price]) =>
-                            price > 0 && (
-                              <Button
-                                key={weight}
-                                variant={
-                                  selectedWeights[product.id]?.weight === weight
-                                    ? "default"
-                                    : "outline"
-                                }
-                                className={`text-sm py-1 px-2 h-auto ${
-                                  selectedWeights[product.id]?.weight === weight
-                                    ? "ring-2 ring-primary"
-                                    : ""
-                                }`}
-                                onClick={() => handleWeightSelect(product.id, weight, price)}
-                              >
-                                {weight}g - ₹{price}
-                              </Button>
-                            )
-                          )}
+                    {inStock ? (
+                      <>
+                        <div className="flex flex-col mb-2">
+                          <span className="text-base font-bold text-primary">From ₹{Math.min(...availableVariants.map(v => v.price))} — ₹{Math.max(...availableVariants.map(v => v.price))}</span>
+                          <span className="text-xs text-green-600 font-medium">In Stock ({availableVariants.reduce((a, v) => a + v.stock, 0)} available)</span>
                         </div>
-                      </div>
 
-                      <div className="grid grid-cols-2 gap-2 mt-2">
-                        <Link
-                          to={`/products/${product.slug}`}
-                          className="w-full"
-                        >
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className="w-full text-xs sm:text-sm h-8"
-                          >
-                            <span className="hidden sm:inline">View Details</span>
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                            </svg>
-                          </Button>
-                        </Link>
-                        <Button
-                          variant="default"
-                          size="sm"
-                          className="gradient-primary text-primary-foreground w-full text-xs sm:text-sm h-8"
-                          onClick={() => {
-                            const { price, weight } = getMainPrice(product);
-                            handleWeightSelect(product.id, weight, price);
-                            handleAddToCart(product);
-                          }}
-                          disabled={addToCartLoading[product.id]}
-                        >
-                          {addToCartLoading[product.id] ? (
-                            <span className="flex items-center justify-center gap-1">
-                              <svg className="animate-spin h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                              </svg>
-                              <span className="hidden sm:inline">Adding...</span>
-                            </span>
-                          ) : (
-                            <>
-                              <span className="hidden sm:inline">Add to Cart</span>
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-                              </svg>
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          {variants.map(variant => (
+                            <Button key={variant.variant_id} variant={selected?.variant_id === variant.variant_id ? 'default' : 'outline'} onClick={() => handleWeightSelect(product.id, variant)} disabled={variant.stock <= 0} className={cn('text-sm py-1 px-2 h-auto', variant.stock <= 0 && 'opacity-50')}>{variant.weight}g - ₹{variant.price}</Button>
+                          ))}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 mt-3">
+                          <Link to={`/products/${slug}`} className="w-full"><Button variant="secondary" size="sm" className="w-full text-xs sm:text-sm h-8">View Details</Button></Link>
+                          <Button variant="default" size="sm" className="gradient-primary text-primary-foreground w-full text-xs sm:text-sm h-8" onClick={() => handleAddToCart(product)} disabled={addToCartLoading[product.id]}>{addToCartLoading[product.id] ? 'Adding...' : 'Add to Cart'}</Button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-base sm:text-lg font-bold text-red-600">Sold Out</span>
+                        <div className="grid grid-cols-2 gap-2 mt-3">
+                          <Link to={`/products/${slug}`} className="w-full"><Button variant="secondary" size="sm" className="w-full text-xs sm:text-sm h-8">View Details</Button></Link>
+                          <Button variant="destructive" size="sm" className="w-full text-xs sm:text-sm h-8" disabled>Sold Out</Button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </motion.div>
               );
             })}
           </motion.div>
 
-          {filteredProducts.length === 0 && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="text-center py-16"
-            >
-              <p className="text-xl text-muted-foreground">
-                No products found for the selected filter.
-              </p>
-            </motion.div>
-          )}
+          {/* Pagination */}
+          <div className="flex justify-center items-center mt-8 gap-4">
+            <Button variant="outline" onClick={() => setCurrentPage(p => Math.max(p - 1, 1))} disabled={currentPage === 1}>Previous</Button>
+            <span className="text-sm font-medium text-gray-700">Page {currentPage} of {totalPages}</span>
+            <Button variant="outline" onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages}>Next</Button>
+          </div>
         </div>
       </section>
     </div>

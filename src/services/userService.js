@@ -1,6 +1,6 @@
 import { tokenService } from './tokenService';
 
-const API_BASE = '/api';
+const API_BASE = import.meta.env.VITE_API_URL;
 
 class UserService {
     async getUserInfo() {
@@ -69,6 +69,28 @@ class UserService {
         }
 
         return await response.json();
+    }
+
+    async getUserOrders(userid) {
+        const token = tokenService.getAccessToken();
+        if (!token) {
+            throw new Error('User not authenticated');
+        }
+
+        const response = await fetch(`${API_BASE}/user-orders/${userid}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': token
+            },
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to fetch user orders');
+        }
+
+        return response.json();
     }
 }
 

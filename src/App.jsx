@@ -15,10 +15,33 @@ import Profile from "./pages/Profile";
 import { MainLayout } from "./components/MainLayout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { ScrollToTop } from "./components/ScrollToTop";
+import ErrorBoundary from "./components/ErrorBoundary";
+import { enableProtection } from "./utils/protection";
+import { useEffect } from "react";
+import { useAuth } from "./context/AuthContext";
+import { useCartStore } from '@/store/cartStore';
 
 function App() {
+  const { user } = useAuth();
+  const { initializeCart } = useCartStore();
+
+  useEffect(() => {
+    enableProtection();
+  }, []);
+
+  useEffect(() => {
+    // Initialize cart when user changes
+    if (user?.userid) {
+      // Small delay to ensure auth token is set
+      const timer = setTimeout(() => {
+        initializeCart(user.userid);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [user, initializeCart]);
+
   return (
-    <>
+    <ErrorBoundary>
       <ScrollToTop />
       <Routes>
         {/* Auth routes without footer */}
@@ -53,7 +76,7 @@ function App() {
         </Route>
       </Routes>
       <Toaster />
-    </>
+    </ErrorBoundary>
   );
 }
 

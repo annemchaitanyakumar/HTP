@@ -1,6 +1,5 @@
 import * as React from "react";
 import { cva } from "class-variance-authority";
-import PropTypes from "prop-types";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
@@ -12,6 +11,8 @@ const badgeVariants = cva(
         secondary: "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
         destructive: "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
         outline: "text-foreground",
+        success: "border-transparent bg-emerald-500/10 text-emerald-700",
+        warning: "border-transparent bg-yellow-500/10 text-yellow-700",
       },
     },
     defaultVariants: {
@@ -20,15 +21,16 @@ const badgeVariants = cva(
   }
 );
 
-function Badge({ className, variant, ...props }) {
+const Badge = React.forwardRef(({ className, variant, ...props }, ref) => {
   return (
-    <div className={cn(badgeVariants({ variant }), className)} {...props} />
+    <div
+      ref={ref}
+      className={cn(badgeVariants({ variant }), className)}
+      {...props}
+    />
   );
-}
+});
 
-Badge.propTypes = {
-  className: PropTypes.string,
-  variant: PropTypes.oneOf(['default', 'secondary', 'destructive', 'outline'])
-};
+Badge.displayName = "Badge";
 
 export { Badge, badgeVariants };

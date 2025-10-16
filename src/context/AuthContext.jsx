@@ -3,6 +3,7 @@ import { authService } from '@/services/authService';
 import { tokenService } from '@/services/tokenService';
 import { userService } from '@/services/userService'; // Import UserService
 import { cookieUtils } from '@/utils/cookieUtils';
+import { useCartStore } from '@/store/cartStore';
 
 const AuthContext = createContext(null);
 
@@ -13,6 +14,7 @@ export const AuthProvider = ({ children }) => {
         return storedUser ? JSON.parse(storedUser) : null;
     });
     const [loading, setLoading] = useState(true);
+    const { clearCart, initializeCart } = useCartStore();
 
     // Log the user data to debug
     useEffect(() => {
@@ -61,6 +63,16 @@ export const AuthProvider = ({ children }) => {
             console.log('[AuthContext] User data from UserService:', userData);
             // Save to localStorage
             localStorage.setItem('authData', JSON.stringify(userData));
+            
+            // Initialize cart and fetch items immediately
+            try {
+                await initializeCart(userData.userid);
+                // Force an immediate cart fetch
+                const cartData = await cartService.fetchCart(userData.userid);
+                useCartStore.setState({ items: cartData.items || [] });
+            } catch (error) {
+                console.error('[AuthContext] Cart initialization error:', error);
+            }
             return true;
         } catch (error) {
             console.error('[AuthContext] Login failed:', error);
@@ -78,6 +90,7 @@ export const AuthProvider = ({ children }) => {
             await authService.logout();
             setUser(null);
             localStorage.removeItem('authData');
+            clearCart(); // Clear cart on logout
             console.log('[AuthContext] Logout successful');
         } catch (error) {
             console.error('[AuthContext] Logout error:', error);
